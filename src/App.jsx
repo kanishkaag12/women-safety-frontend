@@ -1,11 +1,13 @@
-
+import React from 'react';
+import './App.css';
+import Dashboard from './Dashboard';
 
 function App() {
   return (
-    <div>
-      <h1>Women Safety Analytics Dashboard</h1>
+    <div className="App">
+      <Dashboard />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
