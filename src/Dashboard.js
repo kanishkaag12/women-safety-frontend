@@ -20,7 +20,7 @@ function Dashboard() {
 
         const dummyHotspots = ['Main Street', 'Near Park'];
         setHotspots(dummyHotspots);
-    }, []);
+    }, []); // <--- The error is likely somewhere around here
 
     return (
         <div className="dashboard-container">
