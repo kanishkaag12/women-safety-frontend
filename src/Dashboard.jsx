@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AlertCard from './AlertCard.jsx'; // Changed from './AlertCard'
 import HotspotList from './HotspotList.jsx'; // Changed from './HotspotList'
+import './Dashboard.css';
 
 function Dashboard() {
     const [alerts, setAlerts] = useState([]);
