@@ -9,34 +9,39 @@ const Auth = ({ setToken }) => {
     const [aadhaarNumber, setAadhaarNumber] = useState('');
     const navigate = useNavigate();
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        const url = isLogin ? 'http://localhost:5000/api/auth/login' : 'http://localhost:5000/api/auth/register';
-        const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber };
+    // ... (rest of the code)
 
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                if (isLogin) {
-                    setToken(data.token);
-                    localStorage.setItem('token', data.token);
-                    navigate('/dashboard');
-                } else {
-                    alert('Registration successful! Please log in.');
-                    setIsLogin(true);
-                }
+const handleSubmit = async (e) => {
+    e.preventDefault();
+    // Correcting the URL for your frontend
+    const url = isLogin ? 'http://localhost:5173/api/auth/login' : 'http://localhost:5173/api/auth/register';
+    const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await response.json();
+        if (response.ok) {
+            if (isLogin) {
+                setToken(data.token);
+                localStorage.setItem('token', data.token);
+                navigate('/home');
             } else {
-                alert(data.message);
+                alert('Registration successful! Please log in.');
+                setIsLogin(true);
             }
-        } catch (error) {
-            alert('An error occurred. Please try again.');
+        } else {
+            alert(data.message);
         }
-    };
+    } catch (error) {
+        alert('An error occurred. Please try again.');
+    }
+};
+
+// ... (rest of the code)
 
     return (
         <div className="auth-container" style={{
