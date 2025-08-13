@@ -1,56 +1,43 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
-
-const containerStyle = {
-    width: '100%',
-    maxWidth: '600px',
-    height: '400px',
-    border: '2px solid #ff4d4d',
-    borderRadius: '10px',
-    marginTop: '20px',
-};
+import React, { useState, useEffect } from 'react';
 
 const NearbyLocation = () => {
     const [location, setLocation] = useState(null);
     const [error, setError] = useState(null);
-
-
-    const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: import.meta.env.VITE_Google_Maps_API_KEY, // Corrected line
-});
-
-    const success = (position) => {
-        const latitude = position.coords.latitude;
-        const longitude = position.coords.longitude;
-        setLocation({ lat: latitude, lng: longitude });
-        setError(null);
-    };
-
-    const handleError = (err) => {
-        setError(err.message);
-    };
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         if (!navigator.geolocation) {
             setError('Geolocation is not supported by your browser.');
+            setIsLoading(false);
             return;
         }
-        navigator.geolocation.getCurrentPosition(success, handleError);
+
+        const success = (position) => {
+            const latitude = position.coords.latitude;
+            const longitude = position.coords.longitude;
+            console.log('Location obtained:', { latitude, longitude });
+            setLocation({ latitude, longitude });
+            setError(null);
+            setIsLoading(false);
+        };
+
+        const handleError = (err) => {
+            console.error('Geolocation error:', err);
+            setError(err.message);
+            setIsLoading(false);
+        };
+
+        console.log('Requesting location...');
+        navigator.geolocation.getCurrentPosition(success, handleError, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 300000
+        });
     }, []);
 
-    const [map, setMap] = useState(null);
-    const onLoad = useCallback(function callback(map) {
-        if (location) {
-            const bounds = new window.google.maps.LatLngBounds(location);
-            map.fitBounds(bounds);
-        }
-        setMap(map);
-    }, [location]);
-
-    const onUnmount = useCallback(function callback(map) {
-        setMap(null);
-    }, []);
+    const mapUrl = location
+        ? `https://www.openstreetmap.org/export/embed.html?bbox=${location.longitude - 0.01},${location.latitude - 0.01},${location.longitude + 0.01},${location.latitude + 0.01}&marker=${location.latitude},${location.longitude}&layer=mapnik`
+        : 'about:blank';
 
     return (
         <div className="nearby-location-container" style={{
@@ -62,24 +49,64 @@ const NearbyLocation = () => {
             textAlign: 'center',
         }}>
             <h2 style={{ color: '#ff4d4d' }}>Nearby Safe Locations</h2>
-            {error && <p style={{ color: '#ff4d4d' }}>Error: {error}</p>}
-            {location && <p>
-                Your current location: <br />
-                Latitude: {location.lat.toFixed(6)}, Longitude: {location.lng.toFixed(6)}
-            </p>}
-            {isLoaded && location ? (
-                <GoogleMap
-                    mapContainerStyle={containerStyle}
-                    center={location}
-                    zoom={15}
-                    onLoad={onLoad}
-                    onUnmount={onUnmount}
-                >
-                    <MarkerF position={location} />
-                </GoogleMap>
-            ) : (
-                <p>Loading map...</p>
+            
+            {/* Show error */}
+            {error && (
+                <div style={{ color: '#ff4d4d', marginBottom: '10px', padding: '10px', backgroundColor: 'rgba(255,77,77,0.1)', borderRadius: '5px' }}>
+                    <strong>Location Error:</strong> {error}
+                </div>
             )}
+            
+            {/* Show loading status */}
+            {isLoading && (
+                <div style={{ marginBottom: '10px', padding: '10px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '5px' }}>
+                    <strong>Getting your location...</strong>
+                </div>
+            )}
+            
+            {/* Show location info and map */}
+            {location ? (
+                <>
+                    <div style={{ marginBottom: '10px', padding: '10px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '5px' }}>
+                        <strong>Your current location:</strong><br />
+                        Latitude: {location.latitude.toFixed(6)}, Longitude: {location.longitude.toFixed(6)}
+                    </div>
+                    <div style={{
+                        width: '100%',
+                        maxWidth: '600px',
+                        height: '400px',
+                        border: '2px solid #ff4d4d',
+                        borderRadius: '10px',
+                        marginTop: '20px',
+                        overflow: 'hidden'
+                    }}>
+                        <iframe
+                            title="user-location-map"
+                            width="100%"
+                            height="100%"
+                            style={{ border: 0 }}
+                            src={mapUrl}
+                            allowFullScreen
+                            loading="lazy"
+                        ></iframe>
+                    </div>
+                </>
+            ) : !isLoading && !error ? (
+                <div style={{ 
+                    width: '100%', 
+                    maxWidth: '600px', 
+                    height: '400px', 
+                    border: '2px solid #ff4d4d', 
+                    borderRadius: '10px', 
+                    marginTop: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'rgba(255,255,255,0.05)'
+                }}>
+                    <p>Location not available</p>
+                </div>
+            ) : null}
         </div>
     );
 };
