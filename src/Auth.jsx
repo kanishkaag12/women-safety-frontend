@@ -14,7 +14,7 @@ const Auth = ({ setToken }) => {
 const handleSubmit = async (e) => {
     e.preventDefault();
     // Correcting the URL for your frontend
-    const url = isLogin ? 'http://localhost:5173/api/auth/login' : 'http://localhost:5173/api/auth/register';
+    const url = isLogin ? 'http://localhost:5000/api/auth/login' : 'http://localhost:5000/api/auth/register';
     const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber };
 
     try {
