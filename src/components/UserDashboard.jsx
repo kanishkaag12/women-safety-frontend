@@ -5,11 +5,18 @@ import config from '../config';
 import './Dashboard.css';
 import Microphone from './Microphone.jsx';
 import NearbyLocation from './NearbyLocation.jsx';
+import PersonalInfo from './PersonalInfo.jsx';
 
 const UserDashboard = ({ user }) => {
     const [userAlerts, setUserAlerts] = useState([]);
     const [emergencyContacts, setEmergencyContacts] = useState(user?.emergencyContacts || []);
     const [isCreatingAlert, setIsCreatingAlert] = useState(false);
+    const [showProfileModal, setShowProfileModal] = useState(false);
+    const [showTipsModal, setShowTipsModal] = useState(false);
+    const [showReportModal, setShowReportModal] = useState(false);
+    const [reportDescription, setReportDescription] = useState('');
+    const [reportLocation, setReportLocation] = useState('');
+    const [isReporting, setIsReporting] = useState(false);
     const [stats, setStats] = useState({
         totalAlerts: 0,
         activeAlerts: 0,
@@ -24,9 +31,10 @@ const UserDashboard = ({ user }) => {
     const fetchUserData = async () => {
         try {
             const token = localStorage.getItem('token');
+            const userId = user._id || user.id;
             
             // Fetch user's alerts
-            const alertsResponse = await fetch(`${config.ALERTS_BASE}/user/${user.id}`, {
+            const alertsResponse = await fetch(`${config.ALERTS_BASE}/user/${userId}`, {
                 headers: {
                     'x-auth-token': token
                 }
@@ -157,6 +165,77 @@ const UserDashboard = ({ user }) => {
         updateEmergencyContacts(updatedContacts);
     };
 
+    const openReportIncident = () => {
+        setReportDescription('');
+        setReportLocation('');
+        setShowReportModal(true);
+        // Try to prefill location using geolocation
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(async (position) => {
+                const { latitude, longitude } = position.coords;
+                let readableLocation = `${latitude}, ${longitude}`;
+                try {
+                    const geocodeResponse = await fetch(
+                        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+                    );
+                    if (geocodeResponse.ok) {
+                        const geocodeData = await geocodeResponse.json();
+                        if (geocodeData.display_name) {
+                            readableLocation = geocodeData.display_name;
+                        }
+                    }
+                } catch (_) {
+                    // ignore geocoding failure
+                }
+                setReportLocation(readableLocation);
+            });
+        }
+    };
+
+    const submitReportIncident = async (e) => {
+        e.preventDefault();
+        if (!reportDescription.trim()) {
+            alert('Please describe the incident.');
+            return;
+        }
+        try {
+            setIsReporting(true);
+            const token = localStorage.getItem('token');
+            const userId = user._id || user.id;
+            const payload = {
+                userId,
+                userName: user.name,
+                location: reportLocation || 'Location not provided',
+                coordinates: '',
+                type: 'manual',
+                priority: 'low',
+                status: 'active',
+                description: reportDescription.trim()
+            };
+            const response = await fetch(`${config.ALERTS_BASE}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-auth-token': token
+                },
+                body: JSON.stringify(payload)
+            });
+            if (response.ok) {
+                alert('Incident reported successfully. Authorities have been notified.');
+                setShowReportModal(false);
+                fetchUserData();
+            } else {
+                const err = await response.json().catch(() => ({}));
+                alert(err.message || 'Failed to report incident.');
+            }
+        } catch (error) {
+            console.error('Report incident error:', error);
+            alert('Error reporting incident. Please try again.');
+        } finally {
+            setIsReporting(false);
+        }
+    };
+
     return (
         <div className="dashboard user-dashboard">
             <DashboardHeader 
@@ -255,7 +334,7 @@ const UserDashboard = ({ user }) => {
             {/* Alert History */}
             <div className="dashboard-section">
                 <h2>Your Alert History</h2>
-                <div className="table-container">
+                <div className="table-container table-scroll-10">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -263,7 +342,6 @@ const UserDashboard = ({ user }) => {
                                 <th>Type</th>
                                 <th>Location</th>
                                 <th>Status</th>
-                                <th>Response</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -281,12 +359,6 @@ const UserDashboard = ({ user }) => {
                                             {alert.status}
                                         </span>
                                     </td>
-                                    <td>
-                                        {alert.policeResponse ? 
-                                            `Officer ${alert.policeResponse.officerName}` : 
-                                            'Pending'
-                                        }
-                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -298,14 +370,108 @@ const UserDashboard = ({ user }) => {
             <div className="dashboard-section">
                 <h2>Quick Actions</h2>
                 <div className="quick-actions">
-                    <button className="btn btn-primary">Update Profile</button>
-                    <button className="btn btn-success">View Safety Tips</button>
-                    <button className="btn btn-info">Contact Support</button>
-                    <button className="btn btn-warning">Report Incident</button>
+                    <button className="btn btn-primary" onClick={() => setShowProfileModal(true)}>Update Profile</button>
+                    <button className="btn btn-success" onClick={() => setShowTipsModal(true)}>Safety Tips</button>
+                    <button className="btn btn-warning" onClick={openReportIncident}>Report Incident</button>
                 </div>
             </div>
             
             <DashboardFooter />
+
+            {/* Profile Modal */}
+            {showProfileModal && (
+                <div className="modal-overlay" onClick={() => setShowProfileModal(false)}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Update Profile</h3>
+                            <button className="btn btn-danger btn-sm" onClick={() => setShowProfileModal(false)}>Close</button>
+                        </div>
+                        <div className="modal-body">
+                            <PersonalInfo />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Safety Tips Modal */}
+            {showTipsModal && (
+                <div className="modal-overlay" onClick={() => setShowTipsModal(false)}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Safety Tips</h3>
+                            <button className="btn btn-danger btn-sm" onClick={() => setShowTipsModal(false)}>Close</button>
+                        </div>
+                        <div className="modal-body">
+                            <ul style={{ lineHeight: 1.6, margin: 0, paddingLeft: 20 }}>
+                                <li style={{ marginBottom: 12 }}>Share your live location with a trusted contact when traveling alone.</li>
+                                <li style={{ marginBottom: 12 }}>Avoid poorly lit areas at night and stay aware of your surroundings.</li>
+                                <li style={{ marginBottom: 12 }}>Keep emergency contacts updated and easily accessible.</li>
+                                <li style={{ marginBottom: 12 }}>Trust your instincts—if something feels wrong, seek help immediately.</li>
+                                <li style={{ marginBottom: 12 }}>Use the Emergency Alert button in this app if you feel unsafe.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Report Incident Modal */}
+            {showReportModal && (
+                <div className="modal-overlay" onClick={() => setShowReportModal(false)}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Report Incident (Low Priority)</h3>
+                            <button className="btn btn-danger btn-sm" onClick={() => setShowReportModal(false)}>Close</button>
+                        </div>
+                        <div className="modal-body">
+                            <form onSubmit={submitReportIncident}>
+                                <div style={{ marginBottom: 16 }}>
+                                    <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>Description</label>
+                                    <textarea
+                                        value={reportDescription}
+                                        onChange={(e) => setReportDescription(e.target.value)}
+                                        rows={4}
+                                        placeholder="Describe what happened..."
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: 12, 
+                                            borderRadius: 8, 
+                                            border: '1px solid rgba(255,255,255,0.3)',
+                                            background: 'rgba(255,255,255,0.1)',
+                                            color: 'white',
+                                            fontSize: 14
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <div style={{ marginBottom: 16 }}>
+                                    <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>Location (optional)</label>
+                                    <input
+                                        type="text"
+                                        value={reportLocation}
+                                        onChange={(e) => setReportLocation(e.target.value)}
+                                        placeholder="Detected automatically, or enter address"
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: 12, 
+                                            borderRadius: 8, 
+                                            border: '1px solid rgba(255,255,255,0.3)',
+                                            background: 'rgba(255,255,255,0.1)',
+                                            color: 'white',
+                                            fontSize: 14
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                                    <button type="button" className="btn btn-danger" onClick={() => setShowReportModal(false)}>Cancel</button>
+                                    <button type="submit" className="btn btn-success" disabled={isReporting}>
+                                        {isReporting ? 'Submitting...' : 'Submit Report'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

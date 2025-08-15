@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 
-const Microphone = () => {
+const Microphone = ({ user }) => {
     const [isRecording, setIsRecording] = useState(false);
     const [recordings, setRecordings] = useState([]);
     const [currentPlaying, setCurrentPlaying] = useState(null);
@@ -95,6 +95,9 @@ const Microphone = () => {
                         size: audioBlob.size
                     }]);
                     console.log('Recording saved successfully');
+                    
+                    // Automatically send voice alert to police
+                    sendVoiceAlert(audioBlob);
                 } else {
                     console.error('Recording failed: No audio data captured');
                     alert('No audio was captured. Please check your microphone permissions and try again.');
@@ -217,29 +220,70 @@ const Microphone = () => {
         }
     };
 
-    const testMicrophone = async () => {
+    const sendVoiceAlert = async (audioBlob) => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                } 
+            const token = localStorage.getItem('token');
+            const userId = user._id || user.id;
+            
+            // Get current location
+            let location = 'Location not available';
+            let coordinates = '';
+            
+            if (navigator.geolocation) {
+                const position = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+                });
+                
+                const { latitude, longitude } = position.coords;
+                coordinates = `${latitude}, ${longitude}`;
+                
+                try {
+                    const geocodeResponse = await fetch(
+                        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+                    );
+                    
+                    if (geocodeResponse.ok) {
+                        const geocodeData = await geocodeResponse.json();
+                        if (geocodeData.display_name) {
+                            location = geocodeData.display_name;
+                        }
+                    }
+                } catch (geocodeError) {
+                    console.log('Geocoding failed, using coordinates:', geocodeError);
+                    location = coordinates;
+                }
+            }
+            
+            // Create FormData to send audio file
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'voice-alert.webm');
+            formData.append('userId', userId);
+            formData.append('userName', user.name);
+            formData.append('location', location);
+            formData.append('coordinates', coordinates);
+            formData.append('type', 'voice');
+            formData.append('priority', 'high');
+            formData.append('status', 'active');
+            
+            // Send voice alert to backend
+            const response = await fetch('/api/alerts/voice', {
+                method: 'POST',
+                headers: {
+                    'x-auth-token': token
+                },
+                body: formData
             });
             
-            // Create an audio element to test the microphone
-            const audio = new Audio();
-            audio.srcObject = stream;
-            audio.play();
+            if (response.ok) {
+                alert('Voice alert sent successfully! Police have been notified.');
+            } else {
+                const error = await response.json();
+                alert(`Failed to send voice alert: ${error.message}`);
+            }
             
-            alert('Microphone test: You should hear yourself speaking. Click OK to stop the test.');
-            
-            // Stop the stream
-            stream.getTracks().forEach(track => track.stop());
-            
-        } catch (err) {
-            console.error("Microphone test failed:", err);
-            alert(`Microphone test failed: ${err.message}`);
+        } catch (error) {
+            console.error('Error sending voice alert:', error);
+            alert('Error sending voice alert. Please try again.');
         }
     };
 
@@ -249,8 +293,8 @@ const Microphone = () => {
             color: '#fff',
             textAlign: 'center',
         }}>
-            <h2 style={{ color: '#ff4d4d' }}>Audio Recording</h2>
-            <p>Record audio and play it back when needed.</p>
+            <h2 style={{ color: '#ff4d4d' }}>Voice Alert</h2>
+            <p>Record audio to send an immediate voice alert to police. Your recording will be automatically sent when you stop recording.</p>
             
             {/* Recording Controls */}
             <div style={{ marginBottom: '30px' }}>
@@ -271,22 +315,7 @@ const Microphone = () => {
                     {isRecording ? '⏹️ Stop Recording' : '🎤 Start Recording'}
                 </button>
                 
-                <button
-                    onClick={testMicrophone}
-                    style={{
-                        backgroundColor: '#007bff',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '50px',
-                        padding: '15px 30px',
-                        fontSize: '18px',
-                        cursor: 'pointer',
-                        marginTop: '20px',
-                        marginRight: '10px',
-                    }}
-                >
-                    🎧 Test Microphone
-                </button>
+
                 
                 {currentPlaying && (
                     <button

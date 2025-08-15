@@ -16,6 +16,8 @@ const NearbyLocation = () => {
     const [location, setLocation] = useState(null);
     const [address, setAddress] = useState(null);
     const [error, setError] = useState(null);
+    const [policeStations, setPoliceStations] = useState([]);
+    const [isFetchingStations, setIsFetchingStations] = useState(false);
     
     // Add style tag for spinner animation
     useEffect(() => {
@@ -77,7 +79,7 @@ const NearbyLocation = () => {
     };
     
     // Define success callback outside useEffect
-    const success = (position) => {
+    const success = async (position) => {
         const latitude = position.coords.latitude;
         const longitude = position.coords.longitude;
         console.log('Location obtained:', { latitude, longitude });
@@ -87,6 +89,8 @@ const NearbyLocation = () => {
         
         // Get address from coordinates
         getAddressFromCoordinates(latitude, longitude);
+        // Fetch nearby police stations
+        fetchNearbyPoliceStations(latitude, longitude);
     };
 
     // Define error handler outside useEffect
@@ -115,6 +119,61 @@ const NearbyLocation = () => {
             setIsLoading(false);
         }
     };
+
+    // Fetch nearby police stations using Overpass API
+    const fetchNearbyPoliceStations = async (lat, lon) => {
+        try {
+            setIsFetchingStations(true);
+            // Search police amenities within 1000m (1KM)
+            const radius = 1000;
+            const query = `[
+                out:json
+            ];
+            (
+                node["amenity"="police"](around:${radius},${lat},${lon});
+                way["amenity"="police"](around:${radius},${lat},${lon});
+                relation["amenity"="police"](around:${radius},${lat},${lon});
+            );
+            out center 20;`;
+
+            const response = await axios.post(
+                'https://overpass-api.de/api/interpreter',
+                query,
+                { headers: { 'Content-Type': 'text/plain' } }
+            );
+
+            const elements = response.data.elements || [];
+            // Map and sort by distance
+            const stations = elements.map((el) => {
+                const name = (el.tags && (el.tags.name || el.tags.operator || 'Police Station')) || 'Police Station';
+                const latc = el.lat || (el.center && el.center.lat);
+                const lonc = el.lon || (el.center && el.center.lon);
+                const distance = haversineDistance(lat, lon, latc, lonc);
+                return { id: el.id, name, lat: latc, lon: lonc, distance };
+            }).filter(s => s.lat && s.lon)
+              .sort((a, b) => a.distance - b.distance)
+              .slice(0, 10);
+
+            setPoliceStations(stations);
+        } catch (err) {
+            console.error('Failed to fetch nearby police stations:', err);
+        } finally {
+            setIsFetchingStations(false);
+        }
+    };
+
+    // Haversine distance in meters
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+        const toRad = (v) => (v * Math.PI) / 180;
+        const R = 6371000;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return Math.round(R * c);
+    }
 
     // Function to request location with continuous tracking and auto-retry
     const requestLocation = () => {
@@ -187,6 +246,13 @@ const NearbyLocation = () => {
         };
         // This effect will run when component mounts or retryCount changes
     }, [retryCount]);
+
+    // Effect to update police stations when location changes
+    useEffect(() => {
+        if (location) {
+            fetchNearbyPoliceStations(location.latitude, location.longitude);
+        }
+    }, [location]);
     
     // Manual retry function - resets retry count and starts fresh
     const handleRetry = () => {
@@ -195,7 +261,7 @@ const NearbyLocation = () => {
     };
 
     const mapUrl = location
-        ? `https://www.openstreetmap.org/export/embed.html?bbox=${location.longitude - 0.01},${location.latitude - 0.01},${location.longitude + 0.01},${location.latitude + 0.01}&marker=${location.latitude},${location.longitude}&layer=mapnik`
+        ? `https://www.openstreetmap.org/export/embed.html?bbox=${location.longitude - 0.005},${location.latitude - 0.005},${location.longitude + 0.005},${location.latitude + 0.005}&marker=${location.latitude},${location.longitude}&layer=mapnik`
         : 'about:blank';
 
     return (
@@ -396,6 +462,49 @@ const NearbyLocation = () => {
                             allowFullScreen
                             loading="lazy"
                         ></iframe>
+                    </div>
+
+                    {/* Nearby police stations list */}
+                    <div style={{
+                        width: '100%',
+                        maxWidth: '600px',
+                        marginTop: '20px',
+                        backgroundColor: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: '8px',
+                        padding: '12px'
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <strong>Nearby Police Stations</strong>
+                            {isFetchingStations && <span style={{ fontSize: 12, opacity: 0.8 }}>Loading...</span>}
+                        </div>
+                        {policeStations.length === 0 && !isFetchingStations && (
+                            <div style={{ opacity: 0.8, marginTop: 8 }}>None found within 1 km.</div>
+                        )}
+                        {policeStations.map((ps) => (
+                            <div key={ps.id} style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px 10px',
+                                backgroundColor: 'rgba(255,255,255,0.06)',
+                                borderRadius: '6px',
+                                marginTop: 8
+                            }}>
+                                <div style={{ textAlign: 'left' }}>
+                                    <div style={{ fontWeight: 'bold' }}>🚓 {ps.name}</div>
+                                    <div style={{ fontSize: 12, opacity: 0.85 }}>{ps.distance} m away</div>
+                                </div>
+                                <a
+                                    href={`https://www.openstreetmap.org/directions?engine=graphhopper_car&route=${location.latitude}%2C${location.longitude}%3B${ps.lat}%2C${ps.lon}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ color: '#fff', textDecoration: 'underline', fontSize: 13 }}
+                                >
+                                    Directions
+                                </a>
+                            </div>
+                        ))}
                     </div>
                 </>
             ) : !isLoading && !error ? (

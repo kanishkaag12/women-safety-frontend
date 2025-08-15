@@ -95,24 +95,7 @@ const AdminDashboard = ({ user }) => {
         }
     };
 
-    const handleAlertAction = async (alertId, action) => {
-        try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${config.ALERTS_BASE}/${alertId}/${action}`, {
-                method: 'PUT',
-                headers: {
-                    'x-auth-token': token,
-                    'Content-Type': 'application/json'
-                }
-            });
 
-            if (response.ok) {
-                fetchDashboardData(); // Refresh data
-            }
-        } catch (error) {
-            console.error('Error performing alert action:', error);
-        }
-    };
 
     const handleCreateAccount = async (e) => {
         e.preventDefault();
@@ -400,8 +383,9 @@ const AdminDashboard = ({ user }) => {
                                 <th>User</th>
                                 <th>Location</th>
                                 <th>Status</th>
-                                <th>Time</th>
-                                <th>Actions</th>
+                                <th>Assigned To</th>
+                                <th>Created Time</th>
+                                <th>Last Updated</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -414,20 +398,19 @@ const AdminDashboard = ({ user }) => {
                                             {alert.status}
                                         </span>
                                     </td>
+                                    <td>
+                                        {alert.assignedPoliceOfficer ? 
+                                            `${alert.policeStation || 'Unknown Station'} - ${alert.badgeNumber || 'No Badge'}` : 
+                                            'Unassigned'
+                                        }
+                                    </td>
                                     <td>{new Date(alert.createdAt).toLocaleString()}</td>
                                     <td>
-                                        <button 
-                                            onClick={() => handleAlertAction(alert._id, 'resolve')}
-                                            className="btn btn-success btn-sm"
-                                        >
-                                            Resolve
-                                        </button>
-                                        <button 
-                                            onClick={() => handleAlertAction(alert._id, 'escalate')}
-                                            className="btn btn-danger btn-sm"
-                                        >
-                                            Escalate
-                                        </button>
+                                        {alert.resolvedAt ? new Date(alert.resolvedAt).toLocaleString() :
+                                         alert.inProgressAt ? new Date(alert.inProgressAt).toLocaleString() :
+                                         alert.acknowledgedAt ? new Date(alert.acknowledgedAt).toLocaleString() :
+                                         alert.assignedAt ? new Date(alert.assignedAt).toLocaleString() :
+                                         'Not updated'}
                                     </td>
                                 </tr>
                             ))}
