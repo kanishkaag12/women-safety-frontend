@@ -241,7 +241,7 @@ const NearbyLocation = () => {
                                 <p style={{ fontWeight: 'bold', marginBottom: '5px', marginTop: '10px' }}>Firefox:</p>
                                 <ol style={{ paddingLeft: '20px', margin: '5px 0' }}>
                                     <li>Click the lock icon in the address bar</li>
-                                    <li>Click on "Connection secure" > "More Information"</li>
+                                    <li>Click on "Connection secure" &gt; "More Information"</li>
                                     <li>Go to "Permissions" tab</li>
                                     <li>Set "Access Your Location" to "Allow"</li>
                                     <li>Refresh this page</li>
@@ -249,7 +249,7 @@ const NearbyLocation = () => {
                                 
                                 <p style={{ fontWeight: 'bold', marginBottom: '5px', marginTop: '10px' }}>Safari:</p>
                                 <ol style={{ paddingLeft: '20px', margin: '5px 0' }}>
-                                    <li>Click Safari > Preferences > Websites > Location</li>
+                                    <li>Click Safari &gt; Preferences &gt; Websites &gt; Location</li>
                                     <li>Find this website and set permission to "Allow"</li>
                                     <li>Refresh this page</li>
                                 </ol>

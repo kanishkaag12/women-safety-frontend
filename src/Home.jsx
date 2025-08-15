@@ -9,8 +9,15 @@ const Panic = () => <div style={{ padding: '20px', color: '#fff' }}><h2>Panic Bu
 const PersonalInfo = () => <div style={{ padding: '20px', color: '#fff' }}><h2>Personal Information</h2><p>Content for Personal Information goes here...</p></div>;
 
 
-const Home = () => {
+const Home = ({ user }) => {
     const [activeComponent, setActiveComponent] = useState('NearbyLocation');
+
+    const handleLogout = () => {
+        if (window.confirm('Are you sure you want to logout?')) {
+            localStorage.removeItem('token');
+            window.location.reload();
+        }
+    };
 
     const renderComponent = () => {
         switch (activeComponent) {
@@ -38,14 +45,37 @@ const Home = () => {
             color: '#fff',
         }}>
             <header style={{
-                textAlign: 'center',
-                padding: '10px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px 20px',
                 color: '#ff4d4d',
                 fontSize: '24px',
                 fontWeight: 'bold',
                 borderBottom: '2px solid #ff4d4d',
             }}>
-                WE ARE SAFE
+                <div>WE ARE SAFE</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', fontSize: '14px' }}>
+                    {user && (
+                        <span style={{ color: '#fff', fontSize: '16px' }}>
+                            Welcome, {user.name}!
+                        </span>
+                    )}
+                    <button
+                        onClick={handleLogout}
+                        style={{
+                            backgroundColor: '#ff4d4d',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '5px',
+                            padding: '8px 15px',
+                            fontSize: '14px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Logout
+                    </button>
+                </div>
             </header>
 
             <main style={{
