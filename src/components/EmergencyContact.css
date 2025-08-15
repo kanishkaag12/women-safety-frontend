@@ -1,0 +1,38 @@
+.emergency-contact-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.contact-card {
+    transition: all 0.3s ease;
+}
+
+.contact-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.error-message {
+    background-color: rgba(255, 77, 77, 0.2);
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 15px;
+}
+
+.success-message {
+    background-color: rgba(77, 255, 77, 0.2);
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 15px;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+    .emergency-contact-container {
+        padding: 10px;
+    }
+    
+    .contact-card {
+        padding: 10px;
+    }
+}

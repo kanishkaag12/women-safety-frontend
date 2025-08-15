@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import Footer from './components/Footer';
 import NearbyLocation from './components/NearbyLocation'; // Import the new component
 import Microphone from './components/Microphone';       // Import the new component
+import EmergencyContact from './components/EmergencyContact'; // Import the EmergencyContact component
 
 // Keep the other placeholder components for now
 const Panic = () => <div style={{ padding: '20px', color: '#fff' }}><h2>Panic Button</h2><p>Content for Panic Button goes here...</p></div>;
-const EmergencyContact = () => <div style={{ padding: '20px', color: '#fff' }}><h2>Emergency Contacts</h2><p>Content for Emergency Contacts goes here...</p></div>;
 const PersonalInfo = () => <div style={{ padding: '20px', color: '#fff' }}><h2>Personal Information</h2><p>Content for Personal Information goes here...</p></div>;
 
 
