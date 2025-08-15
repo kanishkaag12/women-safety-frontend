@@ -7,6 +7,7 @@ const Auth = ({ setToken }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [aadhaarNumber, setAadhaarNumber] = useState('');
+    const [phoneNumber, setPhoneNumber] = useState('');
     const navigate = useNavigate();
 
     // ... (rest of the code)
@@ -15,7 +16,7 @@ const handleSubmit = async (e) => {
     e.preventDefault();
     // Correcting the URL for your backend
     const url = isLogin ? 'https://women-safety-backend-rkkh.onrender.com/api/auth/login' : 'https://women-safety-backend-rkkh.onrender.com/api/auth/register';
-    const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber };
+    const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber, phoneNumber };
 
     try {
         const response = await fetch(url, {
@@ -106,6 +107,25 @@ const handleSubmit = async (e) => {
                                 type="text"
                                 value={aadhaarNumber}
                                 onChange={(e) => setAadhaarNumber(e.target.value)}
+                                required={!isLogin}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    borderRadius: '5px',
+                                    border: '1px solid #ff4d4d',
+                                    backgroundColor: '#444',
+                                    color: '#fff'
+                                }}
+                            />
+                        </div>
+                    )}
+                    {!isLogin && (
+                        <div className="form-group" style={{ marginBottom: '15px' }}>
+                            <label style={{ display: 'block', marginBottom: '5px' }}>Contact Number:</label>
+                            <input
+                                type="tel"
+                                value={phoneNumber}
+                                onChange={(e) => setPhoneNumber(e.target.value)}
                                 required={!isLogin}
                                 style={{
                                     width: '100%',
