@@ -28,7 +28,7 @@ const EmergencyContact = () => {
 
             console.log('Fetching contacts with token:', token);
 
-            const response = await fetch('http://localhost:5000/api/contacts', {
+            const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/contacts', {
                 headers: {
                     'x-auth-token': token
                 }
@@ -102,7 +102,7 @@ const EmergencyContact = () => {
 
             console.log('Adding contact:', contactData);
 
-            const response = await fetch('http://localhost:5000/api/contacts', {
+            const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/contacts', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -180,7 +180,7 @@ const EmergencyContact = () => {
 
             console.log('Updating contact:', contactId, contactData);
 
-            const response = await fetch(`http://localhost:5000/api/contacts/${contactId}`, {
+            const response = await fetch(`https://women-safety-backend-rkkh.onrender.com/api/contacts/${contactId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -233,7 +233,7 @@ const EmergencyContact = () => {
 
             console.log('Deleting contact:', contactId);
 
-            const response = await fetch(`http://localhost:5000/api/contacts/${contactId}`, {
+            const response = await fetch(`https://women-safety-backend-rkkh.onrender.com/api/contacts/${contactId}`, {
                 method: 'DELETE',
                 headers: {
                     'x-auth-token': token

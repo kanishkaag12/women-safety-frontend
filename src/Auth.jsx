@@ -14,7 +14,7 @@ const Auth = ({ setToken }) => {
 const handleSubmit = async (e) => {
     e.preventDefault();
     // Correcting the URL for your backend
-    const url = isLogin ? 'http://localhost:5000/api/auth/login' : 'http://localhost:5000/api/auth/register';
+    const url = isLogin ? 'https://women-safety-backend-rkkh.onrender.com/api/auth/login' : 'https://women-safety-backend-rkkh.onrender.com/api/auth/register';
     const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber };
 
     try {

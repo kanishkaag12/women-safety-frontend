@@ -12,7 +12,7 @@ function App() {
     // Validate token and get user info
     const validateToken = async (token) => {
         try {
-            const response = await fetch('http://localhost:5000/api/auth/validate', {
+            const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/auth/validate', {
                 headers: {
                     'x-auth-token': token
                 }
@@ -75,7 +75,7 @@ function App() {
 
         const refreshToken = async () => {
             try {
-                const response = await fetch('http://localhost:5000/api/auth/refresh', {
+                const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/auth/refresh', {
                     headers: {
                         'x-auth-token': token
                     }
