@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import config from './config';
 
 const Auth = ({ setToken }) => {
     const [isLogin, setIsLogin] = useState(true);
@@ -8,41 +9,68 @@ const Auth = ({ setToken }) => {
     const [password, setPassword] = useState('');
     const [aadhaarNumber, setAadhaarNumber] = useState('');
     const [phoneNumber, setPhoneNumber] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
     const navigate = useNavigate();
 
-    // ... (rest of the code)
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError('');
 
-const handleSubmit = async (e) => {
-    e.preventDefault();
-    // Correcting the URL for your backend
-    const url = isLogin ? 'https://women-safety-backend-rkkh.onrender.com/api/auth/login' : 'https://women-safety-backend-rkkh.onrender.com/api/auth/register';
-    const body = isLogin ? { email, password } : { name, email, password, aadhaarNumber, phoneNumber };
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const data = await response.json();
-        if (response.ok) {
+        try {
+            const url = isLogin ? config.AUTH_LOGIN : config.AUTH_REGISTER;
+            
+            let body;
             if (isLogin) {
-                setToken(data.token);
-                navigate('/home');
+                body = { email, password };
             } else {
-                alert('Registration successful! Please log in.');
-                setIsLogin(true);
+                // Only allow user registration - no role selection
+                body = { 
+                    name, 
+                    email, 
+                    password, 
+                    aadhaarNumber, 
+                    phoneNumber,
+                    role: 'user' // Force role to be 'user' only
+                };
             }
-        } else {
-            alert(data.message);
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(body),
+            });
+            
+            const data = await response.json();
+            if (response.ok) {
+                if (isLogin) {
+                    setToken(data.token, data.user);
+                    navigate('/dashboard');
+                } else {
+                    alert('Registration successful! Please log in.');
+                    setIsLogin(true);
+                    // Reset form
+                    setName('');
+                    setEmail('');
+                    setPassword('');
+                    setAadhaarNumber('');
+                    setPhoneNumber('');
+                }
+            } else {
+                setError(data.message || 'An error occurred');
+                alert(data.message || 'An error occurred');
+            }
+        } catch (error) {
+            console.error('Auth error:', error);
+            setError('Network error. Please try again.');
+            alert('An error occurred. Please try again.');
+        } finally {
+            setIsLoading(false);
         }
-    } catch (error) {
-        console.error('Auth error:', error);
-        alert('An error occurred. Please try again.');
-    }
-};
-
-// ... (rest of the code)
+    };
 
     return (
         <div className="auth-container" style={{
@@ -138,6 +166,7 @@ const handleSubmit = async (e) => {
                             />
                         </div>
                     )}
+                    
                     <div className="form-group" style={{ marginBottom: '15px' }}>
                         <label style={{ display: 'block', marginBottom: '5px' }}>Password:</label>
                         <input

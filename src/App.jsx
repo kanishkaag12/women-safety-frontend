@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
 import Auth from './Auth.jsx';
-import Home from './Home.jsx';
+import AdminDashboard from './components/AdminDashboard.jsx';
+import PoliceDashboard from './components/PoliceDashboard.jsx';
+import UserDashboard from './components/UserDashboard.jsx';
+import config from './config';
 
 function App() {
     const [token, setToken] = useState(null);
@@ -10,9 +13,12 @@ function App() {
     const [user, setUser] = useState(null);
 
     // Validate token and get user info
-    const validateToken = async (token) => {
+    const validateToken = async () => {
         try {
-            const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/auth/validate', {
+            const token = localStorage.getItem('token');
+            if (!token) return false;
+
+            const response = await fetch(`${config.AUTH_VALIDATE}`, {
                 headers: {
                     'x-auth-token': token
                 }
@@ -21,18 +27,49 @@ function App() {
             if (response.ok) {
                 const userData = await response.json();
                 setUser(userData);
+                setToken(token);
                 return true;
             } else {
-                // Token is invalid, remove it
-                localStorage.removeItem('token');
-                setToken(null);
-                setUser(null);
-                return false;
+                // Token is invalid, try to refresh
+                const refreshResponse = await fetch(`${config.AUTH_REFRESH}`, {
+                    method: 'POST',
+                    headers: {
+                        'x-auth-token': token
+                    }
+                });
+
+                if (refreshResponse.ok) {
+                    const { token: newToken } = await refreshResponse.json();
+                    localStorage.setItem('token', newToken);
+                    setToken(newToken);
+                    
+                    // Validate the new token
+                    const validateResponse = await fetch(`${config.AUTH_VALIDATE}`, {
+                        headers: {
+                            'x-auth-token': newToken
+                        }
+                    });
+                    
+                    if (validateResponse.ok) {
+                        const userData = await validateResponse.json();
+                        setUser(userData);
+                        return true;
+                    }
+                } else {
+                    // Both token and refresh failed, clear everything
+                    localStorage.removeItem('token');
+                    setToken(null);
+                    setUser(null);
+                    return false;
+                }
             }
+            return false;
         } catch (error) {
             console.error('Token validation error:', error);
-            // On network error, assume token is valid for better UX
-            return true;
+            localStorage.removeItem('token');
+            setToken(null);
+            setUser(null);
+            return false;
         }
     };
 
@@ -43,7 +80,7 @@ function App() {
             
             if (storedToken) {
                 setToken(storedToken);
-                const isValid = await validateToken(storedToken);
+                const isValid = await validateToken();
                 if (!isValid) {
                     console.log('Stored token is invalid, user needs to login again');
                 }
@@ -56,12 +93,14 @@ function App() {
     }, []);
 
     // Handle token updates
-    const handleTokenUpdate = (newToken) => {
+    const handleTokenUpdate = (newToken, userData) => {
         if (newToken) {
             localStorage.setItem('token', newToken);
             setToken(newToken);
-            // Validate the new token immediately
-            validateToken(newToken);
+            if (userData) {
+                setUser(userData);
+                console.log('User data set:', userData); // Debug log
+            }
         } else {
             localStorage.removeItem('token');
             setToken(null);
@@ -75,7 +114,7 @@ function App() {
 
         const refreshToken = async () => {
             try {
-                const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/auth/refresh', {
+                const response = await fetch(`${config.AUTH_REFRESH}`, {
                     headers: {
                         'x-auth-token': token
                     }
@@ -94,6 +133,41 @@ function App() {
         const interval = setInterval(refreshToken, 30 * 60 * 1000);
         return () => clearInterval(interval);
     }, [token]);
+
+    // Render appropriate dashboard based on user role
+    const renderDashboard = () => {
+        console.log('=== renderDashboard called ===');
+        console.log('Token:', token);
+        console.log('User:', user);
+        
+        if (!user) {
+            console.log('No user data available');
+            return (
+                <div style={{ padding: '50px', textAlign: 'center' }}>
+                    <h2>Loading user data...</h2>
+                    <p>Please wait while we load your dashboard.</p>
+                </div>
+            );
+        }
+        
+        console.log('Rendering dashboard for user:', user);
+        console.log('User role:', user.role);
+        
+        switch (user.role) {
+            case 'admin':
+                console.log('Rendering Admin Dashboard');
+                return <AdminDashboard user={user} />;
+            case 'police':
+                console.log('Rendering Police Dashboard');
+                return <PoliceDashboard user={user} />;
+            case 'user':
+                console.log('Rendering User Dashboard');
+                return <UserDashboard user={user} />;
+            default:
+                console.log('Unknown role, defaulting to User Dashboard');
+                return <UserDashboard user={user} />;
+        }
+    };
 
     // Show loading screen while initializing
     if (isLoading) {
@@ -135,10 +209,10 @@ function App() {
                     <Route path="/register" element={<Auth setToken={handleTokenUpdate} />} />
                     <Route path="/login" element={<Auth setToken={handleTokenUpdate} />} />
                     <Route
-                        path="/home"
-                        element={token ? <Home user={user} /> : <Navigate to="/login" replace />}
+                        path="/dashboard"
+                        element={token && user ? renderDashboard() : <Navigate to="/login" replace />}
                     />
-                    <Route path="/" element={<Navigate to="/home" replace />} />
+                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
             </div>
         </Router>
