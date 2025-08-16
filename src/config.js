@@ -1,5 +1,11 @@
 // Backend configuration
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+// Prefer env var. If not available (e.g., env disabled on Netlify),
+// auto-detect Netlify domain and fall back to your Render backend.
+const inferredProdUrl = (typeof window !== 'undefined' && /netlify\.app$/i.test(window.location.hostname))
+  ? 'https://women-safety-backend-rkkh.onrender.com'
+  : undefined;
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || inferredProdUrl || 'http://localhost:5000';
 
 const config = {
     // Base backend URL (including protocol + host, no trailing slash)
