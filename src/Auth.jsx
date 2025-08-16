@@ -20,6 +20,7 @@ const Auth = ({ setToken }) => {
 
         try {
             const url = isLogin ? config.AUTH_LOGIN : config.AUTH_REGISTER;
+            console.log('Attempting to connect to:', url);
             
             let body;
             if (isLogin) {
@@ -36,10 +37,13 @@ const Auth = ({ setToken }) => {
                 };
             }
             
+            console.log('Sending request with body:', { ...body, password: '[HIDDEN]' });
+            
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify(body),
             });
@@ -65,8 +69,16 @@ const Auth = ({ setToken }) => {
             }
         } catch (error) {
             console.error('Auth error:', error);
-            setError('Network error. Please try again.');
-            alert('An error occurred. Please try again.');
+            let errorMessage = 'Network error. ';
+            
+            if (!navigator.onLine) {
+                errorMessage += 'Please check your internet connection.';
+            } else {
+                errorMessage += 'Please make sure the backend server is running at ' + config.BACKEND_URL;
+            }
+            
+            setError(errorMessage);
+            alert(errorMessage);
         } finally {
             setIsLoading(false);
         }

@@ -267,13 +267,15 @@ const NearbyLocation = () => {
     return (
         <div className="nearby-location-container" style={{
             padding: '20px',
-            color: '#fff',
+            color: '#333',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             textAlign: 'center',
+            background: '#fff',
+            minHeight: '100vh'
         }}>
-            <h2 style={{ color: '#ff4d4d' }}>Nearby Safe Locations</h2>
+            <h2 style={{ color: '#667eea', marginBottom: '20px' }}>Nearby Safe Locations</h2>
             
             {/* Show error with more detailed instructions */}
             {error && (
@@ -384,14 +386,16 @@ const NearbyLocation = () => {
             {location ? (
                 <>
                     <div style={{ 
-                        marginBottom: '10px', 
-                        padding: '15px', 
-                        backgroundColor: 'rgba(255,255,255,0.1)', 
-                        borderRadius: '8px',
+                        marginBottom: '20px', 
+                        padding: '20px', 
+                        backgroundColor: '#fff', 
+                        borderRadius: '12px',
                         width: '100%',
-                        maxWidth: '600px'
+                        maxWidth: '600px',
+                        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                        border: '1px solid #e1e1e1'
                     }}>
-                        <strong style={{ fontSize: '18px', color: '#ff4d4d' }}>Your Current Location</strong>
+                        <strong style={{ fontSize: '18px', color: '#667eea' }}>Your Current Location</strong>
                         
                         {addressLoading ? (
                             <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -448,10 +452,11 @@ const NearbyLocation = () => {
                         width: '100%',
                         maxWidth: '600px',
                         height: '400px',
-                        border: '2px solid #ff4d4d',
-                        borderRadius: '10px',
+                        border: '2px solid #667eea',
+                        borderRadius: '12px',
                         marginTop: '20px',
-                        overflow: 'hidden'
+                        overflow: 'hidden',
+                        boxShadow: '0 4px 12px rgba(102, 126, 234, 0.15)'
                     }}>
                         <iframe
                             title="user-location-map"
@@ -469,39 +474,59 @@ const NearbyLocation = () => {
                         width: '100%',
                         maxWidth: '600px',
                         marginTop: '20px',
-                        backgroundColor: 'rgba(255,255,255,0.08)',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: '8px',
-                        padding: '12px'
+                        backgroundColor: '#fff',
+                        border: '1px solid #e1e1e1',
+                        borderRadius: '12px',
+                        padding: '20px',
+                        boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
                     }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <strong>Nearby Police Stations</strong>
-                            {isFetchingStations && <span style={{ fontSize: 12, opacity: 0.8 }}>Loading...</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px' }}>
+                            <strong style={{ color: '#667eea', fontSize: '18px' }}>Nearby Police Stations</strong>
+                            {isFetchingStations && <span style={{ fontSize: 14, color: '#6c757d' }}>Loading...</span>}
                         </div>
                         {policeStations.length === 0 && !isFetchingStations && (
-                            <div style={{ opacity: 0.8, marginTop: 8 }}>None found within 1 km.</div>
+                            <div style={{ 
+                                padding: '20px', 
+                                textAlign: 'center', 
+                                backgroundColor: '#f8f9fa', 
+                                borderRadius: '8px',
+                                color: '#6c757d' 
+                            }}>
+                                <span style={{ fontSize: '24px', marginBottom: '10px', display: 'block' }}>🔍</span>
+                                No police stations found within 1 km of your location.
+                            </div>
                         )}
                         {policeStations.map((ps) => (
                             <div key={ps.id} style={{
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
-                                padding: '8px 10px',
-                                backgroundColor: 'rgba(255,255,255,0.06)',
-                                borderRadius: '6px',
-                                marginTop: 8
+                                padding: '15px',
+                                backgroundColor: '#f8f9fa',
+                                borderRadius: '8px',
+                                marginTop: 10,
+                                border: '1px solid #e1e1e1'
                             }}>
                                 <div style={{ textAlign: 'left' }}>
-                                    <div style={{ fontWeight: 'bold' }}>🚓 {ps.name}</div>
-                                    <div style={{ fontSize: 12, opacity: 0.85 }}>{ps.distance} m away</div>
+                                    <div style={{ fontWeight: 'bold', color: '#333', marginBottom: '4px' }}>🚓 {ps.name}</div>
+                                    <div style={{ fontSize: 14, color: '#6c757d' }}>{ps.distance} m away</div>
                                 </div>
                                 <a
                                     href={`https://www.openstreetmap.org/directions?engine=graphhopper_car&route=${location.latitude}%2C${location.longitude}%3B${ps.lat}%2C${ps.lon}`}
                                     target="_blank"
                                     rel="noreferrer"
-                                    style={{ color: '#fff', textDecoration: 'underline', fontSize: 13 }}
+                                    style={{ 
+                                        backgroundColor: '#667eea',
+                                        color: '#fff',
+                                        textDecoration: 'none',
+                                        padding: '8px 16px',
+                                        borderRadius: '6px',
+                                        fontSize: 14,
+                                        fontWeight: '500',
+                                        transition: 'background-color 0.2s ease'
+                                    }}
                                 >
-                                    Directions
+                                    Get Directions
                                 </a>
                             </div>
                         ))}

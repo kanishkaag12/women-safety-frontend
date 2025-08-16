@@ -19,8 +19,9 @@ const config = {
     // Alert endpoints
     ALERTS_BASE: 'http://localhost:5000/api/alerts',
     
-    // Contact endpoints
-    CONTACTS_BASE: 'http://localhost:5000/api/contacts'
-};
+// Contact endpoints
+    CONTACTS_BASE: 'http://localhost:5000/api/contacts',
+    CONTACTS_ADD: 'http://localhost:5000/api/contacts/add'
+}
 
 export default config;

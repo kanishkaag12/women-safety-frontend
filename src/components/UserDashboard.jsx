@@ -6,14 +6,17 @@ import './Dashboard.css';
 import Microphone from './Microphone.jsx';
 import NearbyLocation from './NearbyLocation.jsx';
 import PersonalInfo from './PersonalInfo.jsx';
+import AddContactForm from './AddContactForm.jsx';
 
 const UserDashboard = ({ user }) => {
     const [userAlerts, setUserAlerts] = useState([]);
-    const [emergencyContacts, setEmergencyContacts] = useState(user?.emergencyContacts || []);
+    const [emergencyContacts, setEmergencyContacts] = useState([]);
     const [isCreatingAlert, setIsCreatingAlert] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [showTipsModal, setShowTipsModal] = useState(false);
     const [showReportModal, setShowReportModal] = useState(false);
+    const [showAddContactModal, setShowAddContactModal] = useState(false);
+    const [newContact, setNewContact] = useState({ name: '', phoneNumber: '', relationship: '' });
     const [reportDescription, setReportDescription] = useState('');
     const [reportLocation, setReportLocation] = useState('');
     const [isReporting, setIsReporting] = useState(false);
@@ -25,13 +28,50 @@ const UserDashboard = ({ user }) => {
     });
 
     useEffect(() => {
-        fetchUserData();
-    }, []);
+        if (user && user.id) {
+            console.log('Fetching user data for user:', user.id);
+            fetchUserData();
+        }
+    }, [user]);
 
     const fetchUserData = async () => {
         try {
             const token = localStorage.getItem('token');
+            if (!token) {
+                console.error('No token found');
+                return;
+            }
+
             const userId = user._id || user.id;
+            if (!userId) {
+                console.error('No user ID found');
+                return;
+            }
+            
+            // Fetch user's profile data
+            console.log('Fetching user profile...');
+            const userResponse = await fetch(`${config.AUTH_BASE}/validate`, {
+                headers: {
+                    'x-auth-token': token
+                }
+            });
+
+            if (userResponse.ok) {
+                const userData = await userResponse.json();
+                console.log('User data received:', userData);
+                
+                if (userData.emergencyContacts && Array.isArray(userData.emergencyContacts)) {
+                    console.log('Setting emergency contacts:', userData.emergencyContacts);
+                    setEmergencyContacts(userData.emergencyContacts);
+                } else {
+                    console.log('No emergency contacts found in user data');
+                    setEmergencyContacts([]);
+                }
+            } else {
+                const errorData = await userResponse.json().catch(() => ({ message: 'Failed to fetch user profile' }));
+                console.error('Failed to fetch user profile:', errorData);
+                alert(errorData.message);
+            }
             
             // Fetch user's alerts
             const alertsResponse = await fetch(`${config.ALERTS_BASE}/user/${userId}`, {
@@ -90,7 +130,9 @@ const UserDashboard = ({ user }) => {
                         coordinates: `${latitude}, ${longitude}`,
                         type: 'emergency',
                         priority: 'high',
-                        status: 'active'
+                        status: 'active',
+                        emergencyContacts: emergencyContacts,
+                        description: `Emergency alert from ${user.name}. Emergency contacts: ${emergencyContacts.map(c => `${c.name} (${c.relationship}): ${c.phoneNumber}`).join(', ')}`
                     };
 
                     const response = await fetch(`${config.ALERTS_BASE}`, {
@@ -126,36 +168,54 @@ const UserDashboard = ({ user }) => {
     };
 
     const addEmergencyContact = () => {
-        const name = prompt('Enter contact name:');
-        const phone = prompt('Enter phone number:');
-        const relationship = prompt('Enter relationship:');
+        setShowAddContactModal(true);
+    };
 
-        if (name && phone) {
-            const newContact = { name, phoneNumber: phone, relationship: relationship || '' };
-            setEmergencyContacts([...emergencyContacts, newContact]);
-            
-            // Update user profile
-            updateEmergencyContacts([...emergencyContacts, newContact]);
-        }
+    const handleContactSubmit = async (contactData) => {
+        setEmergencyContacts([...emergencyContacts, contactData]);
+        // Update user profile
+        await updateEmergencyContacts([...emergencyContacts, contactData]);
+        setShowAddContactModal(false);
     };
 
     const updateEmergencyContacts = async (contacts) => {
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch(`${config.AUTH_PROFILE}`, {
+            console.log('Updating emergency contacts:', contacts);
+
+            // Validate contacts before sending
+            const validContacts = contacts.map(contact => ({
+                name: contact.name.trim(),
+                phoneNumber: contact.phoneNumber.trim(),
+                relationship: contact.relationship ? contact.relationship.trim() : ''
+            }));
+
+            const response = await fetch(`${config.AUTH_BASE}/profile`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'x-auth-token': token
                 },
-                body: JSON.stringify({ emergencyContacts: contacts })
+                body: JSON.stringify({ emergencyContacts: validContacts })
             });
 
             if (response.ok) {
                 console.log('Emergency contacts updated successfully');
+                const updatedUser = await response.json();
+                console.log('Updated user data:', updatedUser);
+                
+                if (updatedUser.emergencyContacts) {
+                    setEmergencyContacts(updatedUser.emergencyContacts);
+                    console.log('Emergency contacts state updated:', updatedUser.emergencyContacts);
+                }
+            } else {
+                const errorData = await response.json().catch(() => ({ message: 'Unknown error occurred' }));
+                console.error('Failed to update emergency contacts:', errorData);
+                alert(errorData.message || 'Failed to update emergency contacts. Please try again.');
             }
         } catch (error) {
             console.error('Error updating emergency contacts:', error);
+            alert('Failed to update emergency contacts. Please check your connection and try again.');
         }
     };
 
@@ -471,6 +531,14 @@ const UserDashboard = ({ user }) => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Add Contact Modal */}
+            {showAddContactModal && (
+                <AddContactForm
+                    onSubmit={handleContactSubmit}
+                    onClose={() => setShowAddContactModal(false)}
+                />
             )}
         </div>
     );
