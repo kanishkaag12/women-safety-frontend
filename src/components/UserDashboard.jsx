@@ -486,7 +486,7 @@ const UserDashboard = ({ user }) => {
                             <button className="btn btn-danger btn-sm" onClick={() => setShowProfileModal(false)}>Close</button>
                         </div>
                         <div className="modal-body">
-                            <PersonalInfo />
+                            <PersonalInfo user={user} />
                         </div>
                     </div>
                 </div>

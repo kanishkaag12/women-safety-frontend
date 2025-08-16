@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import DashboardHeader from './DashboardHeader';
 import DashboardFooter from './DashboardFooter';
@@ -21,14 +21,23 @@ const PoliceDashboard = ({ user }) => {
         resolvedCases: 0,
         responseTime: 0
     });
-    const [listeningAlertId, setListeningAlertId] = useState(null);
+    // Separate which alert is selected vs whether we are actively listening
+    const [selectedAlertId, setSelectedAlertId] = useState(null);
+    const [isListening, setIsListening] = useState(false);
+
     const [liveMap, setLiveMap] = useState({}); // alertId -> isLive
     const [recordingsMap, setRecordingsMap] = useState({}); // alertId -> recordings[]
+    const socketRef = useRef(null);
 
     useEffect(() => {
         console.log('PoliceDashboard user object:', user);
         console.log('User ID:', user?.id);
         console.log('User _id:', user?._id);
+        // Restore last selected alert if available
+        try {
+            const saved = localStorage.getItem('pd_selected_alert');
+            if (saved) setSelectedAlertId(saved);
+        } catch (_) {}
         fetchDashboardData();
     }, []);
 
@@ -37,31 +46,64 @@ const PoliceDashboard = ({ user }) => {
         const token = localStorage.getItem('token');
         if (!token) return;
         const socket = io(config.BACKEND_URL, { auth: { token } });
+        socketRef.current = socket;
         socket.on('live-status', ({ alertId, isLive }) => {
             if (!alertId) return;
             setLiveMap(prev => ({ ...prev, [alertId]: !!isLive }));
+            // If the current selection ended, clear listening flag
+            if (!isLive && selectedAlertId === alertId) {
+                setIsListening(false);
+                // Refresh recordings as the final blob should be saved now
+                try { 
+                    loadRecordings(alertId); 
+                    // Retry once after a short delay to avoid race with upload finalize
+                    setTimeout(() => { try { loadRecordings(alertId); } catch(_) {} }, 1500);
+                    // Start a short polling to ensure it shows up
+                    pollRecordings(alertId, 3, 1000);
+                } catch(_) {}
+            }
+        });
+        // When a client reports a recording has been saved, refresh immediately if viewing that alert
+        socket.on('recording-saved', ({ alertId }) => {
+            if (alertId && alertId === selectedAlertId) {
+                loadRecordings(alertId);
+            }
         });
         return () => { try { socket.disconnect(); } catch(_) {} };
-    }, []);
+    }, [selectedAlertId]);
 
-    // Fetch saved recordings when selecting an alert to listen
+    // Helper to load saved recordings for an alert
+    const loadRecordings = async (id) => {
+        if (!id) return;
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            const res = await fetch(`${config.BACKEND_URL}/api/alerts/${id}/recordings`, {
+                headers: { 'x-auth-token': token }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setRecordingsMap(prev => ({ ...prev, [id]: data }));
+            } else {
+                let msg = `${res.status}`;
+                try { const e = await res.json(); msg = e?.message || msg; } catch (_) {}
+                console.warn('Failed to load recordings for alert', id, msg);
+            }
+        } catch (_) { /* ignore */ }
+    };
+
+    // Polling helper to overcome race conditions
+    const pollRecordings = async (id, attempts = 5, delayMs = 1200) => {
+        for (let i = 0; i < attempts; i++) {
+            await loadRecordings(id);
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+    };
+
+    // Fetch saved recordings when selecting an alert (regardless of listening state)
     useEffect(() => {
-        const fetchRecordings = async () => {
-            if (!listeningAlertId) return;
-            try {
-                const token = localStorage.getItem('token');
-                if (!token) return;
-                const res = await fetch(`${config.BACKEND_URL}/api/alerts/${listeningAlertId}/recordings`, {
-                    headers: { 'x-auth-token': token }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setRecordingsMap(prev => ({ ...prev, [listeningAlertId]: data }));
-                }
-            } catch (_) { /* ignore */ }
-        };
-        fetchRecordings();
-    }, [listeningAlertId]);
+        if (selectedAlertId) loadRecordings(selectedAlertId);
+    }, [selectedAlertId]);
 
     const fetchDashboardData = async () => {
         try {
@@ -242,7 +284,7 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Time</th>
                                 <th>Priority</th>
                                 <th>Actions</th>
-                                <th>Live Audio</th>
+                                <th>Live Audio / Message</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -271,13 +313,54 @@ const PoliceDashboard = ({ user }) => {
                                         </button>
                                     </td>
                                     <td>
-                                        <button
-                                            className="btn btn-primary btn-sm"
-        									title={liveMap[alert._id] ? 'Listen to live audio' : 'You can still try to listen; player will wait for live stream'}
-                                            onClick={() => setListeningAlertId(alert._id)}
-                                        >
-                                            {liveMap[alert._id] ? 'Listen' : 'Listen (Waiting for Live)'} {listeningAlertId === alert._id ? '(Active)' : ''}
-                                        </button>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                            {liveMap[alert._id] ? (
+                                                <>
+                                                    <button
+                                                        className="btn btn-primary btn-sm"
+                                                        title={'Listen to live audio'}
+                                                        onClick={() => { setSelectedAlertId(alert._id); setIsListening(true); try { localStorage.setItem('pd_selected_alert', alert._id); } catch(_) {}; loadRecordings(alert._id); }}
+                                                    >
+                                                        Listen {selectedAlertId === alert._id && isListening ? '(Active)' : ''}
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-warning btn-sm"
+                                                        title="Stop this live recording and save now"
+                                                        onClick={() => { 
+                                                            setSelectedAlertId(alert._id); 
+                                                            try { localStorage.setItem('pd_selected_alert', alert._id); } catch(_) {}; 
+                                                            try { socketRef.current?.emit('stop-recording', { alertId: alert._id }); } catch(e) { console.warn('stop-recording emit failed', e); } 
+                                                            // Proactively refresh and poll
+                                                            loadRecordings(alert._id);
+                                                            pollRecordings(alert._id, 3, 1000);
+                                                        }}
+                                                    >
+                                                        Stop & Save
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                alert.description ? (
+                                                    <div style={{
+                                                        background: '#fff3cd',
+                                                        color: '#856404',
+                                                        border: '1px solid #ffeeba',
+                                                        padding: '6px 10px',
+                                                        borderRadius: 6,
+                                                        maxWidth: 280
+                                                    }}>
+                                                        <strong>Message:</strong> {alert.description}
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        className="btn btn-secondary btn-sm"
+                                                        title={'Waiting for live stream'}
+                                                        onClick={() => { setSelectedAlertId(alert._id); setIsListening(true); try { localStorage.setItem('pd_selected_alert', alert._id); } catch(_) {}; loadRecordings(alert._id); }}
+                                                    >
+                                                        Waiting for Live {selectedAlertId === alert._id && isListening ? '(Active)' : ''}
+                                                    </button>
+                                                )
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -302,7 +385,7 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Status</th>
                                 <th>Assigned Time</th>
                                 <th>Actions</th>
-                                <th>Live Audio</th>
+                                <th>Live Audio / Message</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -332,13 +415,53 @@ const PoliceDashboard = ({ user }) => {
                                         </button>
                                     </td>
                                     <td>
-                                        <button
-                                            className="btn btn-primary btn-sm"
-                                            title={liveMap[caseItem._id] ? 'Listen to live audio' : 'You can still try to listen; player will wait for live stream'}
-                                            onClick={() => setListeningAlertId(caseItem._id)}
-                                        >
-                                            {liveMap[caseItem._id] ? 'Listen' : 'Listen (Waiting for Live)'} {listeningAlertId === caseItem._id ? '(Active)' : ''}
-                                        </button>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                            {liveMap[caseItem._id] ? (
+                                                <>
+                                                    <button
+                                                        className="btn btn-primary btn-sm"
+                                                        title={'Listen to live audio'}
+                                                        onClick={() => { setSelectedAlertId(caseItem._id); setIsListening(true); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; loadRecordings(caseItem._id); }}
+                                                    >
+                                                        Listen {selectedAlertId === caseItem._id && isListening ? '(Active)' : ''}
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-warning btn-sm"
+                                                        title="Stop this live recording and save now"
+                                                        onClick={() => { 
+                                                            setSelectedAlertId(caseItem._id); 
+                                                            try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; 
+                                                            try { socketRef.current?.emit('stop-recording', { alertId: caseItem._id }); } catch(e) { console.warn('stop-recording emit failed', e); } 
+                                                            loadRecordings(caseItem._id);
+                                                            pollRecordings(caseItem._id, 3, 1000);
+                                                        }}
+                                                    >
+                                                        Stop & Save
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                caseItem.description ? (
+                                                    <div style={{
+                                                        background: '#fff3cd',
+                                                        color: '#856404',
+                                                        border: '1px solid #ffeeba',
+                                                        padding: '6px 10px',
+                                                        borderRadius: 6,
+                                                        maxWidth: 280
+                                                    }}>
+                                                        <strong>Message:</strong> {caseItem.description}
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        className="btn btn-secondary btn-sm"
+                                                        title={'Waiting for live stream'}
+                                                        onClick={() => { setSelectedAlertId(caseItem._id); setIsListening(true); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; loadRecordings(caseItem._id); }}
+                                                    >
+                                                        Waiting for Live {selectedAlertId === caseItem._id && isListening ? '(Active)' : ''}
+                                                    </button>
+                                                )
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -363,7 +486,7 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Status</th>
                                 <th>Acknowledged Time</th>
                                 <th>Actions</th>
-                                <th>Live Audio</th>
+                                <th>Live Audio / Message</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -393,12 +516,45 @@ const PoliceDashboard = ({ user }) => {
                                         </button>
                                     </td>
                                     <td>
-                                        <button
-                                            className="btn btn-primary btn-sm"
-                                            onClick={() => setListeningAlertId(caseItem._id)}
-                                        >
-                                            Listen {listeningAlertId === caseItem._id ? '(Active)' : ''}
-                                        </button>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                            {liveMap[caseItem._id] ? (
+                                                <>
+                                                    <button
+                                                        className="btn btn-primary btn-sm"
+                                                        onClick={() => { setSelectedAlertId(caseItem._id); setIsListening(true); loadRecordings(caseItem._id); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; }}
+                                                    >
+                                                        Listen {selectedAlertId === caseItem._id && isListening ? '(Active)' : ''}
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-warning btn-sm"
+                                                        title="Stop this live recording and save now"
+                                                        onClick={() => { setSelectedAlertId(caseItem._id); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; try { socketRef.current?.emit('stop-recording', { alertId: caseItem._id }); } catch(_) {} }}
+                                                    >
+                                                        Stop & Save
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                caseItem.description ? (
+                                                    <div style={{
+                                                        background: '#fff3cd',
+                                                        color: '#856404',
+                                                        border: '1px solid #ffeeba',
+                                                        padding: '6px 10px',
+                                                        borderRadius: 6,
+                                                        maxWidth: 280
+                                                    }}>
+                                                        <strong>Message:</strong> {caseItem.description}
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        className="btn btn-secondary btn-sm"
+                                                        onClick={() => { setSelectedAlertId(caseItem._id); setIsListening(true); loadRecordings(caseItem._id); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; }}
+                                                    >
+                                                        Waiting for Live {selectedAlertId === caseItem._id && isListening ? '(Active)' : ''}
+                                                    </button>
+                                                )
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -423,7 +579,7 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Status</th>
                                 <th>Started Time</th>
                                 <th>Actions</th>
-                                <th>Live Audio</th>
+                                <th>Live Audio / Message</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -447,12 +603,36 @@ const PoliceDashboard = ({ user }) => {
                                         </button>
                                     </td>
                                     <td>
-                                        <button
-                                            className="btn btn-primary btn-sm"
-                                            onClick={() => setListeningAlertId(caseItem._id)}
-                                        >
-                                            Listen {listeningAlertId === caseItem._id ? '(Active)' : ''}
-                                        </button>
+                                        {liveMap[caseItem._id] ? (
+                                            <button
+                                                className="btn btn-primary btn-sm"
+                                                title={'Listen to live audio'}
+                                                onClick={() => { setSelectedAlertId(caseItem._id); setIsListening(true); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; loadRecordings(caseItem._id); }}
+                                            >
+                                                Listen {selectedAlertId === caseItem._id && isListening ? '(Active)' : ''}
+                                            </button>
+                                        ) : (
+                                            caseItem.description ? (
+                                                <div style={{
+                                                    background: '#fff3cd',
+                                                    color: '#856404',
+                                                    border: '1px solid #ffeeba',
+                                                    padding: '6px 10px',
+                                                    borderRadius: 6,
+                                                    maxWidth: 280
+                                                }}>
+                                                    <strong>Message:</strong> {caseItem.description}
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    className="btn btn-secondary btn-sm"
+                                                    title={'Waiting for live stream'}
+                                                    onClick={() => { setSelectedAlertId(caseItem._id); setIsListening(true); try { localStorage.setItem('pd_selected_alert', caseItem._id); } catch(_) {}; loadRecordings(caseItem._id); }}
+                                                >
+                                                    Waiting for Live {selectedAlertId === caseItem._id && isListening ? '(Active)' : ''}
+                                                </button>
+                                            )
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -524,11 +704,25 @@ const PoliceDashboard = ({ user }) => {
             <div className="dashboard-section">
                 <AlertMap alerts={activeAlerts} />
             </div>
-            {listeningAlertId && (
-                <div className="dashboard-section">
-                    <h3>Live Audio Stream</h3>
-                    <LiveAudioListener alertId={listeningAlertId} />
-                    <h4 style={{ marginTop: 12 }}>Saved Recordings</h4>
+            <div className="dashboard-section">
+                <h3>Live Recording</h3>
+                {selectedAlertId && isListening ? (
+                    <LiveAudioListener 
+                        alertId={selectedAlertId}
+                        onLiveStart={({ alertId }) => setLiveMap(prev => ({ ...prev, [alertId]: true }))}
+                        onLiveEnd={({ alertId }) => {
+                            setLiveMap(prev => ({ ...prev, [alertId]: false }));
+                            setIsListening(false);
+                            loadRecordings(alertId);
+                            // Retry after short delay
+                            setTimeout(() => { try { loadRecordings(alertId); } catch(_) {} }, 1500);
+                        }}
+                    />
+                ) : (
+                    <div className="section-placeholder">{selectedAlertId ? 'Not listening. Press Listen to start.' : 'Select an alert and press the Live button to start listening.'}</div>
+                )}
+                <h4 style={{ marginTop: 12 }}>All Recordings</h4>
+                {selectedAlertId ? (
                     <div style={{ overflowX: 'auto' }}>
                         <table className="table table-striped table-dark">
                             <thead>
@@ -541,7 +735,7 @@ const PoliceDashboard = ({ user }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {(recordingsMap[listeningAlertId] || []).map((rec) => (
+                                {(recordingsMap[selectedAlertId] || []).map((rec) => (
                                     <tr key={rec._id}>
                                         <td>{new Date(rec.createdAt).toLocaleString()}</td>
                                         <td>{rec.userId?.name || rec.userName} {rec.userId?.email ? `(${rec.userId.email})` : ''}</td>
@@ -556,15 +750,29 @@ const PoliceDashboard = ({ user }) => {
                             </tbody>
                         </table>
                     </div>
-                    <button
-                        className="btn btn-secondary btn-sm"
-                        style={{ marginTop: 10 }}
-                        onClick={() => setListeningAlertId(null)}
-                    >
-                        Stop Listening
-                    </button>
-                </div>
-            )}
+                ) : (
+                    <div className="section-placeholder">No alert selected. Choose an alert to view its recordings.</div>
+                )}
+                {selectedAlertId && (
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => { setIsListening(false); setSelectedAlertId(null); try { localStorage.removeItem('pd_selected_alert'); } catch(_) {}; }}
+                        >
+                            Clear Selection
+                        </button>
+                        {isListening && (
+                            <button
+                                className="btn btn-warning btn-sm"
+                                onClick={() => { try { socketRef.current?.emit('stop-recording', { alertId: selectedAlertId }); } catch(_) {} }}
+                                title="Ask the recording device to stop and save now"
+                            >
+                                Stop Recording & Save
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
             
             <DashboardFooter />
         </div>

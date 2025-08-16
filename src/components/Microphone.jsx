@@ -14,6 +14,7 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
     const animationFrameRef = useRef(null);
     const socketRef = useRef(null);
     const mimeTypeRef = useRef('audio/webm');
+    const skipFinalizeRef = useRef(false); // used for quick restart to resend init segment
 
     // Initialize socket connection when alertId becomes available
     useEffect(() => {
@@ -23,10 +24,39 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             try { socketRef.current.disconnect(); } catch (_) {}
             socketRef.current = null;
         }
-        const socket = io(config.BACKEND_URL, { auth: { token } });
+        const socket = io(config.BACKEND_URL, {
+            auth: { token },
+            transports: ['websocket'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            timeout: 10000
+        });
         socketRef.current = socket;
+        // Try to join room immediately (queued until connected)
+        try { socket.emit('join-alert', { alertId }); } catch (_) {}
         socket.on('connect', () => {
+            console.log('Microphone socket connected', socket.id);
             socket.emit('join-alert', { alertId });
+        });
+        socket.on('connect_error', (err) => {
+            console.error('Microphone socket connect_error:', err?.message || err);
+        });
+        socket.on('error', (err) => {
+            console.error('Microphone socket error:', err);
+        });
+        // Allow police/dashboard to remotely stop & finalize this recording
+        socket.on('stop-recording', ({ alertId: stopId }) => {
+            if (!stopId || stopId !== alertId) return;
+            console.log('Received stop-recording from server for alert', stopId);
+            stopRecording();
+        });
+        // If a listener joins late, server asks us to resend init segment by quickly restarting
+        socket.on('request-audio-restart', ({ alertId: reqAlertId }) => {
+            if (!reqAlertId || reqAlertId !== alertId) return;
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                console.log('Received request-audio-restart, performing quick restart to resend init segment');
+                quickRestartRecorder();
+            }
         });
         return () => {
             if (socketRef.current) {
@@ -38,7 +68,7 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
     }, [alertId]);
 
     const startRecording = async () => {
-        if (!canRecord) {
+        if (!canRecord || !alertId) {
             alert('Please send an Emergency Alert first to enable live recording.');
             return;
         }
@@ -70,12 +100,19 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             console.log('Audio track settings:', audioTracks[0].getSettings());
             console.log('Audio track enabled:', audioTracks[0].enabled);
             
-            // Try different MIME types
+            // Choose best supported MIME type for recording that is also MSE-playable
+            // Priority: 'audio/webm;codecs=opus' -> 'audio/webm' -> 'audio/mp4;codecs=mp4a.40.2' -> fallback 'audio/webm'
             let mimeType = 'audio/webm;codecs=opus';
-            if (!MediaRecorder.isTypeSupported('audio/webm')) {
-                mimeType = 'audio/mp4';
-                if (!MediaRecorder.isTypeSupported('audio/mp4')) {
-                    mimeType = 'audio/wav';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    mimeType = 'audio/webm';
+                } else if (MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')) {
+                    // Note: Some browsers (Safari/iOS) may only support MP4, but MSE playback of MP4 can be limited.
+                    // We still emit the correct codec string so listeners can attempt to add a compatible SourceBuffer.
+                    mimeType = 'audio/mp4;codecs=mp4a.40.2';
+                } else {
+                    // Final fallback
+                    mimeType = 'audio/webm';
                 }
             }
             mimeTypeRef.current = mimeType;
@@ -83,10 +120,10 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             console.log('Using MIME type:', mimeType);
             
             mediaRecorderRef.current = new MediaRecorder(stream, {
-                mimeType: mimeType
+                mimeType
             });
             audioChunksRef.current = [];
-            
+
             mediaRecorderRef.current.ondataavailable = async (event) => {
                 console.log('Data available event:', event.data.size, 'bytes');
                 if (event.data.size > 0) {
@@ -130,6 +167,13 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
                 console.log('Total chunks:', audioChunksRef.current.length);
                 console.log('Total size:', audioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0));
                 
+                // During quick restart, skip finalization and do not emit audio-end
+                if (skipFinalizeRef.current) {
+                    console.log('Quick restart in progress: skipping finalize/upload and audio-end emit');
+                    skipFinalizeRef.current = false;
+                    return;
+                }
+
                 const audioBlob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
                 console.log('Audio blob created:', audioBlob.size, 'bytes');
                 
@@ -161,7 +205,7 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             };
 
             // Start recording with smaller time slices for better data capture
-            mediaRecorderRef.current.start(500); // Capture data every 500ms
+            mediaRecorderRef.current.start(400); // Capture data roughly every 400ms
             setIsRecording(true);
             console.log("Recording started with stream:", stream);
 
@@ -179,6 +223,80 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             } else {
                 alert(`Error accessing microphone: ${err.message}`);
             }
+        }
+    };
+
+    // Perform a quick restart to resend the init segment for late-joining listeners
+    const quickRestartRecorder = () => {
+        try {
+            const rec = mediaRecorderRef.current;
+            if (!rec || rec.state !== 'recording') return;
+            const stream = rec.stream;
+            skipFinalizeRef.current = true; // prevent onstop finalize and audio-end
+            rec.stop(); // do not stop tracks
+            // Give a short delay to allow onstop to run, then recreate recorder on same stream
+            setTimeout(() => {
+                try {
+                    mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: mimeTypeRef.current });
+                    audioChunksRef.current = [];
+
+                    mediaRecorderRef.current.ondataavailable = async (event) => {
+                        if (event.data && event.data.size > 0) {
+                            audioChunksRef.current.push(event.data);
+                            try {
+                                if (socketRef.current && alertId) {
+                                    const arrayBuf = await event.data.arrayBuffer();
+                                    socketRef.current.emit('audio-chunk', { alertId, mimeType: mimeTypeRef.current, chunk: arrayBuf });
+                                }
+                            } catch (e) { console.warn('Streaming chunk failed:', e); }
+                        }
+                    };
+
+                    mediaRecorderRef.current.onstart = () => {
+                        console.log('MediaRecorder restarted to resend init segment');
+                        try { if (socketRef.current && alertId) { socketRef.current.emit('audio-start', { alertId, mimeType: mimeTypeRef.current }); } } catch(_) {}
+                    };
+
+                    mediaRecorderRef.current.onerror = (event) => {
+                        console.error('MediaRecorder error (restart):', event.error);
+                    };
+
+                    mediaRecorderRef.current.onstop = () => {
+                        // Respect skip flag for subsequent restarts as well
+                        if (skipFinalizeRef.current) { skipFinalizeRef.current = false; return; }
+                        // Real stop: finalize like the primary onstop
+                        try {
+                            console.log('Restarted recorder stopped; finalizing and emitting audio-end');
+                            const audioBlob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                            if (audioBlob.size > 0) {
+                                const audioUrl = URL.createObjectURL(audioBlob);
+                                const timestamp = new Date().toLocaleString();
+                                setRecordings(prev => [...prev, {
+                                    id: Date.now(),
+                                    url: audioUrl,
+                                    timestamp,
+                                    duration: 'Unknown',
+                                    size: audioBlob.size
+                                }]);
+                                // Upload the final blob so it appears in All Recordings on dashboards
+                                sendVoiceAlert(audioBlob);
+                            }
+                            try { if (socketRef.current && alertId) { socketRef.current.emit('audio-end', { alertId }); } } catch(_) {}
+                        } catch (e) {
+                            console.error('Finalize failed in restart onstop:', e);
+                        } finally {
+                            setIsRecording(false);
+                            stopAudioLevelMonitoring();
+                        }
+                    };
+
+                    mediaRecorderRef.current.start(400);
+                } catch (err) {
+                    console.error('Failed to restart MediaRecorder:', err);
+                }
+            }, 60);
+        } catch (e) {
+            console.error('quickRestartRecorder failed:', e);
         }
     };
 
@@ -320,8 +438,9 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             // Create FormData to send audio file
             const formData = new FormData();
             // Use appropriate extension based on mime type if available
-            const filename = (mimeTypeRef.current || '').includes('wav') ? 'voice-alert.wav'
-                : (mimeTypeRef.current || '').includes('mp4') ? 'voice-alert.m4a'
+            const mt = (mimeTypeRef.current || '').toLowerCase();
+            const filename = mt.includes('wav') ? 'voice-alert.wav'
+                : mt.includes('mp4') ? 'voice-alert.m4a'
                 : 'voice-alert.webm';
             formData.append('audio', audioBlob, filename);
             formData.append('userId', userId);
@@ -345,6 +464,8 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
 
             if (response.ok) {
                 alert('Voice alert sent successfully! Police have been notified.');
+                // Notify dashboards that a recording is available now
+                try { if (socketRef.current && alertId) socketRef.current.emit('recording-saved', { alertId }); } catch(_) {}
             } else {
                 let message = 'Unknown error';
                 try {
@@ -373,15 +494,15 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
             <div style={{ marginBottom: '30px' }}>
                 <button
                     onClick={isRecording ? stopRecording : startRecording}
-                    disabled={!isRecording && !canRecord}
+                    disabled={!isRecording && (!canRecord || !alertId)}
                     style={{
-                        backgroundColor: (!isRecording && !canRecord) ? '#888' : (isRecording ? '#4d4d4d' : '#ff4d4d'),
+                        backgroundColor: (!isRecording && (!canRecord || !alertId)) ? '#888' : (isRecording ? '#4d4d4d' : '#ff4d4d'),
                         color: '#fff',
                         border: 'none',
                         borderRadius: '50px',
                         padding: '15px 30px',
                         fontSize: '18px',
-                        cursor: (!isRecording && !canRecord) ? 'not-allowed' : 'pointer',
+                        cursor: (!isRecording && (!canRecord || !alertId)) ? 'not-allowed' : 'pointer',
                         marginTop: '20px',
                         marginRight: '10px',
                     }}
@@ -538,7 +659,7 @@ const Microphone = ({ user, canRecord = true, alertId }) => {
                     borderRadius: '10px',
                     border: '1px dashed #666'
                 }}>
-                    <p>No recordings yet. Start recording to see your audio files here.</p>
+                    <p>No recordings yet. {(!canRecord || !alertId) ? 'Send an Emergency Alert to enable live recording.' : 'Start recording to see your audio files here.'}</p>
                 </div>
             )}
         </div>

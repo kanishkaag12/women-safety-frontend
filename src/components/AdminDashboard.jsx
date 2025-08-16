@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
 import DashboardHeader from './DashboardHeader';
 import DashboardFooter from './DashboardFooter';
 import AlertMap from './AlertMap';
-import LiveAudioListener from './LiveAudioListener';
 import config from '../config';
 import './Dashboard.css';
 
@@ -17,9 +15,7 @@ const AdminDashboard = ({ user }) => {
         activeAlerts: 0,
         policeOfficers: 0
     });
-    const [listeningAlertId, setListeningAlertId] = useState(null);
-    const [liveMap, setLiveMap] = useState({}); // alertId -> isLive
-    const [recordingsMap, setRecordingsMap] = useState({}); // alertId -> recordings[]
+    // Live audio features removed for Admin dashboard
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [createFormData, setCreateFormData] = useState({
         name: '',
@@ -37,36 +33,9 @@ const AdminDashboard = ({ user }) => {
         fetchDashboardData();
     }, []);
 
-    // Subscribe to global live-status to enable/disable Listen buttons
-    useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (!token) return;
-        const socket = io(config.BACKEND_URL, { auth: { token } });
-        socket.on('live-status', ({ alertId, isLive }) => {
-            if (!alertId) return;
-            setLiveMap(prev => ({ ...prev, [alertId]: !!isLive }));
-        });
-        return () => { try { socket.disconnect(); } catch(_) {} };
-    }, []);
+    // Live audio subscription removed
 
-    // Fetch saved recordings when selecting an alert to listen
-    useEffect(() => {
-        const fetchRecordings = async () => {
-            if (!listeningAlertId) return;
-            try {
-                const token = localStorage.getItem('token');
-                if (!token) return;
-                const res = await fetch(`${config.BACKEND_URL}/api/alerts/${listeningAlertId}/recordings`, {
-                    headers: { 'x-auth-token': token }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setRecordingsMap(prev => ({ ...prev, [listeningAlertId]: data }));
-                }
-            } catch (_) { /* ignore */ }
-        };
-        fetchRecordings();
-    }, [listeningAlertId]);
+    // Live audio recordings fetch removed
 
     // Utility: detect if a string looks like "lat, lng"
     const looksLikeCoords = (str) => {
@@ -577,7 +546,6 @@ const AdminDashboard = ({ user }) => {
                                 <th>Assigned To</th>
                                 <th>Created Time</th>
                                 <th>Last Updated</th>
-                                <th>Live Audio</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -618,59 +586,13 @@ const AdminDashboard = ({ user }) => {
                                          alert.assignedAt ? new Date(alert.assignedAt).toLocaleString() :
                                          'Not updated'}
                                     </td>
-                                    <td>
-                                        <button
-                                            className="btn btn-primary btn-sm"
-                                            title={liveMap[alert._id] ? 'Listen to live audio' : 'You can still try to listen; player will wait for live stream'}
-                                            onClick={() => setListeningAlertId(alert._id)}
-                                        >
-                                            {liveMap[alert._id] ? 'Listen' : 'Listen (Waiting for Live)'} {listeningAlertId === alert._id ? '(Active)' : ''}
-                                        </button>
-                                    </td>
+                                    
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
-                {listeningAlertId && (
-                    <div style={{ marginTop: '15px' }}>
-                        <h3>Live Audio Stream</h3>
-                        <LiveAudioListener alertId={listeningAlertId} />
-                        <h4 style={{ marginTop: 12 }}>Saved Recordings</h4>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table className="table table-striped table-dark">
-                                <thead>
-                                    <tr>
-                                        <th>When</th>
-                                        <th>User</th>
-                                        <th>MIME</th>
-                                        <th>Size</th>
-                                        <th>Play/Download</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {(recordingsMap[listeningAlertId] || []).map((rec) => (
-                                        <tr key={rec._id}>
-                                            <td>{new Date(rec.createdAt).toLocaleString()}</td>
-                                            <td>{rec.userId?.name || rec.userName} {rec.userId?.email ? `(${rec.userId.email})` : ''}</td>
-                                            <td>{rec.mimeType}</td>
-                                            <td>{(rec.size/1024).toFixed(1)} KB</td>
-                                            <td>
-                                                <audio controls src={`${config.BACKEND_URL}${rec.fileUrl}`} style={{ maxWidth: 220 }} />
-                                                <a className="btn btn-sm btn-secondary" style={{ marginLeft: 8 }} href={`${config.BACKEND_URL}${rec.fileUrl}`} target="_blank" rel="noreferrer">Download</a>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {(recordingsMap[listeningAlertId] || []).length === 0 && (
-                                        <tr>
-                                            <td colSpan="5">No recordings yet for this alert.</td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
+                {/* Live audio panel removed for Admin dashboard */}
             </div>
 
             {/* Alert Map View */}

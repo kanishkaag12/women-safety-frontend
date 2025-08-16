@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import config from '../config';
 
-const PersonalInfo = () => {
+const PersonalInfo = ({ user }) => {
     const [profile, setProfile] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -50,8 +50,24 @@ const PersonalInfo = () => {
     };
 
     useEffect(() => {
-        fetchProfile();
-    }, []);
+        // If user prop is provided, trust it as the current logged-in user context
+        if (user && (user.role || user.email)) {
+            setProfile({
+                name: user.name || '',
+                email: user.email || '',
+                aadhaarNumber: user.aadhaarNumber || '',
+                phoneNumber: user.phoneNumber || '',
+                age: user.age || '',
+                gender: user.gender || '',
+                homeAddress: user.homeAddress || '',
+                relativeAddress: user.relativeAddress || '',
+                guardianContactNumber: user.guardianContactNumber || ''
+            });
+        } else {
+            // Fallback to fetching from API
+            fetchProfile();
+        }
+    }, [user]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -108,6 +124,9 @@ const PersonalInfo = () => {
         );
     }
 
+    // Guard: Only regular users should edit via this screen
+    const isUserRole = (user?.role === 'user') || undefined; // undefined means unknown, allow edit
+
     return (
         <div style={{ padding: '20px', color: '#333' }}>
             <h2 style={{ color: '#667eea' }}>Your Profile</h2>
@@ -137,11 +156,24 @@ const PersonalInfo = () => {
                 </div>
             )}
 
+            {user && user.role && user.role !== 'user' && (
+                <div style={{
+                    color: '#ff4757',
+                    marginBottom: '10px',
+                    padding: '10px',
+                    backgroundColor: 'rgba(255,71,87,0.1)',
+                    borderRadius: '5px',
+                    border: '1px solid #ff4757'
+                }}>
+                    You are logged in as "{user.role}". Profile editing here is for users only.
+                </div>
+            )}
+
             <form onSubmit={handleSave} style={{ backgroundColor: '#fff', padding: 20, borderRadius: 10, border: '1px solid #e1e1e1', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div>
                         <label style={{ display: 'block', marginBottom: 6 }}>Name</label>
-                        <input name="name" value={profile.name} onChange={handleChange} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
+                        <input name="name" value={profile.name} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
                     </div>
                     <div>
                         <label style={{ display: 'block', marginBottom: 6 }}>Email</label>
@@ -153,15 +185,15 @@ const PersonalInfo = () => {
                     </div>
                     <div>
                         <label style={{ display: 'block', marginBottom: 6 }}>Contact Number</label>
-                        <input name="phoneNumber" value={profile.phoneNumber} onChange={handleChange} placeholder="Enter your phone number" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
+                        <input name="phoneNumber" value={profile.phoneNumber} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} placeholder="Enter your phone number" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
                     </div>
                     <div>
                         <label style={{ display: 'block', marginBottom: 6 }}>Age</label>
-                        <input name="age" type="number" min="0" value={profile.age} onChange={handleChange} placeholder="Enter your age" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
+                        <input name="age" type="number" min="0" value={profile.age} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} placeholder="Enter your age" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
                     </div>
                     <div>
                         <label style={{ display: 'block', marginBottom: 6 }}>Gender</label>
-                        <select name="gender" value={profile.gender} onChange={handleChange} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }}>
+                        <select name="gender" value={profile.gender} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }}>
                             <option value="">Select</option>
                             <option value="female">Female</option>
                             <option value="male">Male</option>
@@ -171,19 +203,19 @@ const PersonalInfo = () => {
                     </div>
                     <div style={{ gridColumn: '1 / span 2' }}>
                         <label style={{ display: 'block', marginBottom: 6 }}>Home Address</label>
-                        <textarea name="homeAddress" value={profile.homeAddress} onChange={handleChange} rows={2} placeholder="Enter your home address" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
+                        <textarea name="homeAddress" value={profile.homeAddress} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} rows={2} placeholder="Enter your home address" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
                     </div>
                     <div style={{ gridColumn: '1 / span 2' }}>
                         <label style={{ display: 'block', marginBottom: 6 }}>Close Relative Address</label>
-                        <textarea name="relativeAddress" value={profile.relativeAddress} onChange={handleChange} rows={2} placeholder="Enter your close relative's address" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
+                        <textarea name="relativeAddress" value={profile.relativeAddress} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} rows={2} placeholder="Enter your close relative's address" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
                     </div>
                     <div style={{ gridColumn: '1 / span 2' }}>
                         <label style={{ display: 'block', marginBottom: 6 }}>Guardian Contact Number</label>
-                        <input name="guardianContactNumber" value={profile.guardianContactNumber} onChange={handleChange} placeholder="Enter guardian's phone number" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
+                        <input name="guardianContactNumber" value={profile.guardianContactNumber} onChange={handleChange} disabled={user && user.role && user.role !== 'user'} placeholder="Enter guardian's phone number" style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #667eea', background: '#fff', color: '#333' }} />
                     </div>
                 </div>
                 <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-                    <button type="submit" disabled={isSaving} style={{ background: '#667eea', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 16px', cursor: 'pointer', transition: 'background 0.3s ease' }}>
+                    <button type="submit" disabled={isSaving || (user && user.role && user.role !== 'user')} style={{ background: '#667eea', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 16px', cursor: 'pointer', transition: 'background 0.3s ease' }}>
                         {isSaving ? 'Saving...' : 'Save Profile'}
                     </button>
                     <button type="button" onClick={fetchProfile} disabled={isSaving} style={{ background: '#f8f9fa', color: '#6c757d', border: '1px solid #e1e1e1', borderRadius: 6, padding: '10px 16px', cursor: 'pointer', transition: 'all 0.3s ease' }}>
