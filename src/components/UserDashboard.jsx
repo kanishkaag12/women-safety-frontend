@@ -12,6 +12,7 @@ const UserDashboard = ({ user }) => {
     const [userAlerts, setUserAlerts] = useState([]);
     const [emergencyContacts, setEmergencyContacts] = useState([]);
     const [isCreatingAlert, setIsCreatingAlert] = useState(false);
+    const [currentEmergencyAlertId, setCurrentEmergencyAlertId] = useState(null); // enable voice only after emergency
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [showTipsModal, setShowTipsModal] = useState(false);
     const [showReportModal, setShowReportModal] = useState(false);
@@ -28,8 +29,13 @@ const UserDashboard = ({ user }) => {
     });
 
     useEffect(() => {
-        if (user && user.id) {
-            console.log('Fetching user data for user:', user.id);
+        const token = localStorage.getItem('token');
+        if (token) {
+            console.log('Token found. Fetching user data...');
+            fetchUserData();
+        } else if (user && (user.id || user._id)) {
+            // Fallback if parent provides user immediately
+            console.log('Fetching user data for user:', user.id || user._id);
             fetchUserData();
         }
     }, [user]);
@@ -42,15 +48,9 @@ const UserDashboard = ({ user }) => {
                 return;
             }
 
-            const userId = user._id || user.id;
-            if (!userId) {
-                console.error('No user ID found');
-                return;
-            }
-            
             // Fetch user's profile data
             console.log('Fetching user profile...');
-            const userResponse = await fetch(`${config.AUTH_BASE}/validate`, {
+            const userResponse = await fetch(config.AUTH_VALIDATE, {
                 headers: {
                     'x-auth-token': token
                 }
@@ -72,9 +72,23 @@ const UserDashboard = ({ user }) => {
                 console.error('Failed to fetch user profile:', errorData);
                 alert(errorData.message);
             }
-            
+
+            // Determine userId for alerts from validated user or prop
+            const validatedUser = await (async () => {
+                try {
+                    const res = await fetch(config.AUTH_VALIDATE, { headers: { 'x-auth-token': token } });
+                    if (res.ok) return res.json();
+                } catch (_) {}
+                return null;
+            })();
+            const userIdForAlerts = (validatedUser && (validatedUser._id || validatedUser.id)) || user._id || user.id;
+            if (!userIdForAlerts) {
+                console.warn('Could not resolve user ID for alerts fetch. Skipping alerts fetch.');
+                return;
+            }
+
             // Fetch user's alerts
-            const alertsResponse = await fetch(`${config.ALERTS_BASE}/user/${userId}`, {
+            const alertsResponse = await fetch(`${config.ALERTS_BASE}/user/${userIdForAlerts}`, {
                 headers: {
                     'x-auth-token': token
                 }
@@ -96,73 +110,75 @@ const UserDashboard = ({ user }) => {
     };
 
     const sendEmergencyAlert = async () => {
+        setIsCreatingAlert(true);
         try {
-            setIsCreatingAlert(true);
             const token = localStorage.getItem('token');
-            
-            // Get current location
+            if (!token) {
+                alert('You are not authenticated. Please log in again.');
+                return;
+            }
+
+            const userId = user?._id || user?.id;
+            const userName = user?.name || 'User';
+
+            // Try to get location, but don't block sending the alert
+            let location = 'Location not available';
+            let coordinates = '';
+
             if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(async (position) => {
-                    const { latitude, longitude } = position.coords;
-                    
-                    // Convert coordinates to readable address
-                    let readableLocation = `${latitude}, ${longitude}`;
-                    try {
-                        const geocodeResponse = await fetch(
-                            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+                try {
+                    const position = await new Promise((resolve, reject) => {
+                        const timeoutId = setTimeout(() => reject({ code: 3, message: 'Timeout expired' }), 6000);
+                        navigator.geolocation.getCurrentPosition(
+                            (pos) => { clearTimeout(timeoutId); resolve(pos); },
+                            (err) => { clearTimeout(timeoutId); reject(err); },
+                            { timeout: 8000, enableHighAccuracy: true }
                         );
-                        
-                        if (geocodeResponse.ok) {
-                            const geocodeData = await geocodeResponse.json();
-                            if (geocodeData.display_name) {
-                                readableLocation = geocodeData.display_name;
-                            }
-                        }
-                    } catch (geocodeError) {
-                        console.log('Geocoding failed, using coordinates:', geocodeError);
-                        // Fallback to coordinates if geocoding fails
-                    }
-                    
-                    const alertData = {
-                        userId: user.id,
-                        userName: user.name,
-                        location: readableLocation,
-                        coordinates: `${latitude}, ${longitude}`,
-                        type: 'emergency',
-                        priority: 'high',
-                        status: 'active',
-                        emergencyContacts: emergencyContacts,
-                        description: `Emergency alert from ${user.name}. Emergency contacts: ${emergencyContacts.map(c => `${c.name} (${c.relationship}): ${c.phoneNumber}`).join(', ')}`
-                    };
-
-                    const response = await fetch(`${config.ALERTS_BASE}`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-auth-token': token
-                        },
-                        body: JSON.stringify(alertData)
                     });
+                    const { latitude, longitude } = position.coords;
+                    location = `${latitude}, ${longitude}`;
+                    coordinates = `${latitude}, ${longitude}`;
+                } catch (_) {
+                    // keep fallback location
+                }
+            }
 
-                    if (response.ok) {
-                        alert('Emergency alert sent successfully! Help is on the way.');
-                        fetchUserData(); // Refresh data
-                    } else {
-                        alert('Failed to send emergency alert. Please try again.');
-                    }
-                    setIsCreatingAlert(false);
-                }, (error) => {
-                    console.error('Error getting location:', error);
-                    alert('Unable to get your location. Please try again.');
-                    setIsCreatingAlert(false);
-                });
+            const alertData = {
+                userId,
+                userName,
+                location,
+                coordinates,
+                type: 'emergency',
+                priority: 'high',
+                status: 'active',
+                emergencyContacts: emergencyContacts,
+                description: `Emergency alert from ${userName}.`
+            };
+
+            const response = await fetch(`${config.ALERTS_BASE}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-auth-token': token
+                },
+                body: JSON.stringify(alertData)
+            });
+
+            if (response.ok) {
+                const created = await response.json().catch(() => null);
+                if (created && created._id) {
+                    setCurrentEmergencyAlertId(created._id);
+                }
+                alert('Emergency alert sent successfully! Help is on the way.');
+                fetchUserData();
             } else {
-                alert('Geolocation is not supported by this browser.');
-                setIsCreatingAlert(false);
+                const err = await response.json().catch(() => ({}));
+                alert(err.message || 'Failed to send emergency alert. Please try again.');
             }
         } catch (error) {
             console.error('Error sending emergency alert:', error);
             alert('Failed to send emergency alert. Please try again.');
+        } finally {
             setIsCreatingAlert(false);
         }
     };
@@ -172,57 +188,75 @@ const UserDashboard = ({ user }) => {
     };
 
     const handleContactSubmit = async (contactData) => {
-        setEmergencyContacts([...emergencyContacts, contactData]);
-        // Update user profile
-        await updateEmergencyContacts([...emergencyContacts, contactData]);
+        // Add a single contact via API and refresh state from server response
+        await addEmergencyContactApi(contactData);
         setShowAddContactModal(false);
     };
 
-    const updateEmergencyContacts = async (contacts) => {
+    const addEmergencyContactApi = async (contact) => {
         try {
             const token = localStorage.getItem('token');
-            console.log('Updating emergency contacts:', contacts);
-
-            // Validate contacts before sending
-            const validContacts = contacts.map(contact => ({
-                name: contact.name.trim(),
-                phoneNumber: contact.phoneNumber.trim(),
+            const payload = {
+                name: contact.name?.trim(),
+                phoneNumber: contact.phoneNumber?.trim(),
                 relationship: contact.relationship ? contact.relationship.trim() : ''
-            }));
+            };
 
-            const response = await fetch(`${config.AUTH_BASE}/profile`, {
-                method: 'PUT',
+            const response = await fetch(config.CONTACTS_BASE, {
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'x-auth-token': token
                 },
-                body: JSON.stringify({ emergencyContacts: validContacts })
+                body: JSON.stringify(payload)
             });
 
             if (response.ok) {
-                console.log('Emergency contacts updated successfully');
-                const updatedUser = await response.json();
-                console.log('Updated user data:', updatedUser);
-                
-                if (updatedUser.emergencyContacts) {
-                    setEmergencyContacts(updatedUser.emergencyContacts);
-                    console.log('Emergency contacts state updated:', updatedUser.emergencyContacts);
-                }
+                // Backend returns the updated contacts array
+                const contactsFromServer = await response.json();
+                setEmergencyContacts(Array.isArray(contactsFromServer) ? contactsFromServer : []);
             } else {
                 const errorData = await response.json().catch(() => ({ message: 'Unknown error occurred' }));
-                console.error('Failed to update emergency contacts:', errorData);
-                alert(errorData.message || 'Failed to update emergency contacts. Please try again.');
+                console.error('Failed to add emergency contact:', errorData);
+                alert(errorData.message || 'Failed to add contact. Please try again.');
             }
         } catch (error) {
-            console.error('Error updating emergency contacts:', error);
-            alert('Failed to update emergency contacts. Please check your connection and try again.');
+            console.error('Error adding emergency contact:', error);
+            alert('Failed to add contact. Please check your connection and try again.');
         }
     };
 
-    const removeEmergencyContact = (index) => {
-        const updatedContacts = emergencyContacts.filter((_, i) => i !== index);
-        setEmergencyContacts(updatedContacts);
-        updateEmergencyContacts(updatedContacts);
+    const removeEmergencyContact = async (index) => {
+        const contact = emergencyContacts[index];
+        if (!window.confirm('Are you sure you want to delete this contact?')) {
+            return;
+        }
+        // If contact has an _id, delete from server; otherwise just remove locally
+        if (contact && contact._id) {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${config.CONTACTS_BASE}/${contact._id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'x-auth-token': token
+                    }
+                });
+                if (response.ok) {
+                    // Refresh from server to avoid stale state
+                    await fetchUserData();
+                } else {
+                    const err = await response.json().catch(() => ({ message: 'Failed to delete contact' }));
+                    alert(err.message || 'Failed to delete contact.');
+                }
+            } catch (error) {
+                console.error('Error deleting contact:', error);
+                alert('Error deleting contact. Please try again.');
+            }
+        } else {
+            // No _id yet (unsaved), remove locally
+            const updatedContacts = emergencyContacts.filter((_, i) => i !== index);
+            setEmergencyContacts(updatedContacts);
+        }
     };
 
     const openReportIncident = () => {
@@ -346,7 +380,12 @@ const UserDashboard = ({ user }) => {
                 <div className="safety-tools">
                     <div className="tool-card">
                         <h3>Voice Alert</h3>
-                        <Microphone user={user} />
+                        <Microphone user={user} canRecord={!!currentEmergencyAlertId} alertId={currentEmergencyAlertId} />
+                        {!currentEmergencyAlertId && (
+                            <p style={{ marginTop: 8, color: '#666' }}>
+                                Start recording is enabled only after you send an Emergency Alert.
+                            </p>
+                        )}
                     </div>
                     <div className="tool-card">
                         <h3>Nearby Safe Locations</h3>
@@ -495,9 +534,9 @@ const UserDashboard = ({ user }) => {
                                             width: '100%', 
                                             padding: 12, 
                                             borderRadius: 8, 
-                                            border: '1px solid rgba(255,255,255,0.3)',
-                                            background: 'rgba(255,255,255,0.1)',
-                                            color: 'white',
+                                            border: '1px solid #667eea',
+                                            background: '#fff',
+                                            color: '#333',
                                             fontSize: 14
                                         }}
                                         required
@@ -514,9 +553,9 @@ const UserDashboard = ({ user }) => {
                                             width: '100%', 
                                             padding: 12, 
                                             borderRadius: 8, 
-                                            border: '1px solid rgba(255,255,255,0.3)',
-                                            background: 'rgba(255,255,255,0.1)',
-                                            color: 'white',
+                                            border: '1px solid #667eea',
+                                            background: '#fff',
+                                            color: '#333',
                                             fontSize: 14
                                         }}
                                     />

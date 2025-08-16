@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { io } from 'socket.io-client';
+import config from '../config';
 
-const Microphone = ({ user }) => {
+const Microphone = ({ user, canRecord = true, alertId }) => {
     const [isRecording, setIsRecording] = useState(false);
     const [recordings, setRecordings] = useState([]);
     const [currentPlaying, setCurrentPlaying] = useState(null);
@@ -10,11 +12,39 @@ const Microphone = ({ user }) => {
     const audioContextRef = useRef(null);
     const analyserRef = useRef(null);
     const animationFrameRef = useRef(null);
+    const socketRef = useRef(null);
+    const mimeTypeRef = useRef('audio/webm');
+
+    // Initialize socket connection when alertId becomes available
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (!token || !alertId) return;
+        if (socketRef.current) {
+            try { socketRef.current.disconnect(); } catch (_) {}
+            socketRef.current = null;
+        }
+        const socket = io(config.BACKEND_URL, { auth: { token } });
+        socketRef.current = socket;
+        socket.on('connect', () => {
+            socket.emit('join-alert', { alertId });
+        });
+        return () => {
+            if (socketRef.current) {
+                socketRef.current.emit('leave-alert', { alertId });
+                socketRef.current.disconnect();
+                socketRef.current = null;
+            }
+        };
+    }, [alertId]);
 
     const startRecording = async () => {
+        if (!canRecord) {
+            alert('Please send an Emergency Alert first to enable live recording.');
+            return;
+        }
         try {
             console.log('Starting microphone access...');
-            
+
             // First, check if MediaRecorder is supported
             if (!window.MediaRecorder) {
                 alert('MediaRecorder is not supported in this browser. Please use Chrome, Firefox, or Edge.');
@@ -41,13 +71,14 @@ const Microphone = ({ user }) => {
             console.log('Audio track enabled:', audioTracks[0].enabled);
             
             // Try different MIME types
-            let mimeType = 'audio/webm';
+            let mimeType = 'audio/webm;codecs=opus';
             if (!MediaRecorder.isTypeSupported('audio/webm')) {
                 mimeType = 'audio/mp4';
                 if (!MediaRecorder.isTypeSupported('audio/mp4')) {
                     mimeType = 'audio/wav';
                 }
             }
+            mimeTypeRef.current = mimeType;
             
             console.log('Using MIME type:', mimeType);
             
@@ -56,11 +87,24 @@ const Microphone = ({ user }) => {
             });
             audioChunksRef.current = [];
             
-            mediaRecorderRef.current.ondataavailable = (event) => {
+            mediaRecorderRef.current.ondataavailable = async (event) => {
                 console.log('Data available event:', event.data.size, 'bytes');
                 if (event.data.size > 0) {
                     audioChunksRef.current.push(event.data);
                     console.log('Audio chunk received:', event.data.size, 'bytes');
+                    // Live stream chunk over socket
+                    try {
+                        if (socketRef.current && alertId) {
+                            const arrayBuf = await event.data.arrayBuffer();
+                            socketRef.current.emit('audio-chunk', {
+                                alertId,
+                                mimeType: mimeTypeRef.current,
+                                chunk: arrayBuf
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('Streaming chunk failed:', e);
+                    }
                 } else {
                     console.warn('Empty audio chunk received');
                 }
@@ -68,6 +112,12 @@ const Microphone = ({ user }) => {
 
             mediaRecorderRef.current.onstart = () => {
                 console.log('MediaRecorder started successfully');
+                // Notify listeners that streaming is live
+                try {
+                    if (socketRef.current && alertId) {
+                        socketRef.current.emit('audio-start', { alertId, mimeType: mimeTypeRef.current });
+                    }
+                } catch (_) {}
             };
 
             mediaRecorderRef.current.onerror = (event) => {
@@ -80,7 +130,7 @@ const Microphone = ({ user }) => {
                 console.log('Total chunks:', audioChunksRef.current.length);
                 console.log('Total size:', audioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0));
                 
-                const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+                const audioBlob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
                 console.log('Audio blob created:', audioBlob.size, 'bytes');
                 
                 if (audioBlob.size > 0) {
@@ -96,7 +146,13 @@ const Microphone = ({ user }) => {
                     }]);
                     console.log('Recording saved successfully');
                     
-                    // Automatically send voice alert to police
+                    // Signal end of live stream
+                    try {
+                        if (socketRef.current && alertId) {
+                            socketRef.current.emit('audio-end', { alertId });
+                        }
+                    } catch (_) {}
+                    // Optional fallback upload of final blob
                     sendVoiceAlert(audioBlob);
                 } else {
                     console.error('Recording failed: No audio data captured');
@@ -223,67 +279,84 @@ const Microphone = ({ user }) => {
     const sendVoiceAlert = async (audioBlob) => {
         try {
             const token = localStorage.getItem('token');
+            if (!token) {
+                alert('You are not authenticated. Please log in again.');
+                return;
+            }
             const userId = user._id || user.id;
-            
-            // Get current location
+
+            // Get current location (non-blocking fallback behavior)
             let location = 'Location not available';
             let coordinates = '';
-            
-            if (navigator.geolocation) {
-                const position = await new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
-                });
-                
-                const { latitude, longitude } = position.coords;
-                coordinates = `${latitude}, ${longitude}`;
-                
-                try {
-                    const geocodeResponse = await fetch(
-                        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
-                    );
-                    
-                    if (geocodeResponse.ok) {
-                        const geocodeData = await geocodeResponse.json();
-                        if (geocodeData.display_name) {
-                            location = geocodeData.display_name;
+            try {
+                if (navigator.geolocation) {
+                    const position = await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, enableHighAccuracy: true });
+                    });
+                    const { latitude, longitude } = position.coords;
+                    coordinates = `${latitude}, ${longitude}`;
+                    try {
+                        const geocodeResponse = await fetch(
+                            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+                        );
+                        if (geocodeResponse.ok) {
+                            const geocodeData = await geocodeResponse.json();
+                            if (geocodeData.display_name) {
+                                location = geocodeData.display_name;
+                            } else {
+                                location = coordinates;
+                            }
+                        } else {
+                            location = coordinates;
                         }
+                    } catch {
+                        location = coordinates;
                     }
-                } catch (geocodeError) {
-                    console.log('Geocoding failed, using coordinates:', geocodeError);
-                    location = coordinates;
                 }
+            } catch (geoErr) {
+                console.log('Geolocation unavailable, proceeding without it:', geoErr?.message || geoErr);
             }
-            
+
             // Create FormData to send audio file
             const formData = new FormData();
-            formData.append('audio', audioBlob, 'voice-alert.webm');
+            // Use appropriate extension based on mime type if available
+            const filename = (mimeTypeRef.current || '').includes('wav') ? 'voice-alert.wav'
+                : (mimeTypeRef.current || '').includes('mp4') ? 'voice-alert.m4a'
+                : 'voice-alert.webm';
+            formData.append('audio', audioBlob, filename);
             formData.append('userId', userId);
-            formData.append('userName', user.name);
+            formData.append('userName', user.name || 'Unknown');
             formData.append('location', location);
             formData.append('coordinates', coordinates);
             formData.append('type', 'voice');
             formData.append('priority', 'high');
             formData.append('status', 'active');
-            
-            // Send voice alert to backend
-            const response = await fetch('/api/alerts/voice', {
+            formData.append('mimeType', mimeTypeRef.current || 'audio/webm');
+            if (alertId) formData.append('alertId', alertId);
+
+            // Send voice alert to backend using configured URL
+            const response = await fetch(`${config.BACKEND_URL}/api/alerts/voice`, {
                 method: 'POST',
                 headers: {
                     'x-auth-token': token
                 },
                 body: formData
             });
-            
+
             if (response.ok) {
                 alert('Voice alert sent successfully! Police have been notified.');
             } else {
-                const error = await response.json();
-                alert(`Failed to send voice alert: ${error.message}`);
+                let message = 'Unknown error';
+                try {
+                    const error = await response.json();
+                    message = error?.message || JSON.stringify(error);
+                } catch {}
+                alert(`Failed to send voice alert: ${message}`);
             }
-            
+
         } catch (error) {
             console.error('Error sending voice alert:', error);
-            alert('Error sending voice alert. Please try again.');
+            alert(`Error sending voice alert. ${error?.message || 'Please try again.'}`);
         }
     };
 
@@ -300,14 +373,15 @@ const Microphone = ({ user }) => {
             <div style={{ marginBottom: '30px' }}>
                 <button
                     onClick={isRecording ? stopRecording : startRecording}
+                    disabled={!isRecording && !canRecord}
                     style={{
-                        backgroundColor: isRecording ? '#4d4d4d' : '#ff4d4d',
+                        backgroundColor: (!isRecording && !canRecord) ? '#888' : (isRecording ? '#4d4d4d' : '#ff4d4d'),
                         color: '#fff',
                         border: 'none',
                         borderRadius: '50px',
                         padding: '15px 30px',
                         fontSize: '18px',
-                        cursor: 'pointer',
+                        cursor: (!isRecording && !canRecord) ? 'not-allowed' : 'pointer',
                         marginTop: '20px',
                         marginRight: '10px',
                     }}

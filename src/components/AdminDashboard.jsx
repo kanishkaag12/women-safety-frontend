@@ -1,19 +1,25 @@
 import React, { useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
 import DashboardHeader from './DashboardHeader';
 import DashboardFooter from './DashboardFooter';
 import AlertMap from './AlertMap';
+import LiveAudioListener from './LiveAudioListener';
 import config from '../config';
 import './Dashboard.css';
 
 const AdminDashboard = ({ user }) => {
     const [users, setUsers] = useState([]);
     const [alerts, setAlerts] = useState([]);
+    const [addressCache, setAddressCache] = useState({}); // id -> human-readable address
     const [stats, setStats] = useState({
         totalUsers: 0,
         totalAlerts: 0,
         activeAlerts: 0,
         policeOfficers: 0
     });
+    const [listeningAlertId, setListeningAlertId] = useState(null);
+    const [liveMap, setLiveMap] = useState({}); // alertId -> isLive
+    const [recordingsMap, setRecordingsMap] = useState({}); // alertId -> recordings[]
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [createFormData, setCreateFormData] = useState({
         name: '',
@@ -30,6 +36,86 @@ const AdminDashboard = ({ user }) => {
     useEffect(() => {
         fetchDashboardData();
     }, []);
+
+    // Subscribe to global live-status to enable/disable Listen buttons
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const socket = io(config.BACKEND_URL, { auth: { token } });
+        socket.on('live-status', ({ alertId, isLive }) => {
+            if (!alertId) return;
+            setLiveMap(prev => ({ ...prev, [alertId]: !!isLive }));
+        });
+        return () => { try { socket.disconnect(); } catch(_) {} };
+    }, []);
+
+    // Fetch saved recordings when selecting an alert to listen
+    useEffect(() => {
+        const fetchRecordings = async () => {
+            if (!listeningAlertId) return;
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const res = await fetch(`${config.BACKEND_URL}/api/alerts/${listeningAlertId}/recordings`, {
+                    headers: { 'x-auth-token': token }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setRecordingsMap(prev => ({ ...prev, [listeningAlertId]: data }));
+                }
+            } catch (_) { /* ignore */ }
+        };
+        fetchRecordings();
+    }, [listeningAlertId]);
+
+    // Utility: detect if a string looks like "lat, lng"
+    const looksLikeCoords = (str) => {
+        if (!str || typeof str !== 'string') return false;
+        const re = /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/;
+        return re.test(str.trim());
+    };
+
+    // Reverse geocode with OSM Nominatim, cache by alert id
+    const reverseGeocode = async (alert) => {
+        try {
+            if (!alert || !alert.coordinates) return null;
+            const [latStr, lngStr] = alert.coordinates.split(',');
+            const lat = latStr?.trim();
+            const lon = lngStr?.trim();
+            if (!lat || !lon) return null;
+            const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=16&addressdetails=1`;
+            const res = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data?.display_name || null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    // When alerts change, populate address cache for those that need it
+    useEffect(() => {
+        const fillAddresses = async () => {
+            const toResolve = alerts.filter(a => (!a.location || looksLikeCoords(a.location)) && a.coordinates && !addressCache[a._id]);
+            if (toResolve.length === 0) return;
+            const updates = {};
+            for (const a of toResolve) {
+                const addr = await reverseGeocode(a);
+                if (addr) updates[a._id] = addr;
+            }
+            if (Object.keys(updates).length) {
+                setAddressCache(prev => ({ ...prev, ...updates }));
+            }
+        };
+        if (alerts && alerts.length) {
+            fillAddresses();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [alerts]);
 
     const fetchDashboardData = async () => {
         try {
@@ -158,6 +244,11 @@ const AdminDashboard = ({ user }) => {
             [name]: value
         }));
     };
+
+    // Split users by role for dedicated sections
+    const adminUsers = users.filter(u => u.role === 'admin');
+    const policeUsers = users.filter(u => u.role === 'police');
+    const regularUsers = users.filter(u => u.role === 'user');
 
     return (
         <div className="dashboard admin-dashboard">
@@ -327,10 +418,13 @@ const AdminDashboard = ({ user }) => {
                 )}
             </div>
 
-            {/* Users Management */}
+            {/* Role Management */}
             <div className="dashboard-section">
-                <h2>User Management</h2>
-                <div className="table-container">
+                <h2>Role Management</h2>
+
+                {/* Admins Section */}
+                <h3 style={{ marginTop: 10 }}>Admins</h3>
+                <div className="table-container table-scroll-3">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -342,7 +436,7 @@ const AdminDashboard = ({ user }) => {
                             </tr>
                         </thead>
                         <tbody>
-                            {users.map(user => (
+                            {adminUsers.map(user => (
                                 <tr key={user._id}>
                                     <td>{user.name}</td>
                                     <td>{user.email}</td>
@@ -353,13 +447,13 @@ const AdminDashboard = ({ user }) => {
                                     </td>
                                     <td>{user.phoneNumber || 'N/A'}</td>
                                     <td>
-                                        <button 
+                                        <button
                                             onClick={() => handleUserAction(user._id, 'suspend')}
                                             className="btn btn-warning btn-sm"
                                         >
                                             Suspend
                                         </button>
-                                        <button 
+                                        <button
                                             onClick={() => handleUserAction(user._id, 'activate')}
                                             className="btn btn-success btn-sm"
                                         >
@@ -368,6 +462,103 @@ const AdminDashboard = ({ user }) => {
                                     </td>
                                 </tr>
                             ))}
+                            {adminUsers.length === 0 && (
+                                <tr><td colSpan="5">No admins</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Police Section */}
+                <h3 style={{ marginTop: 20 }}>Police</h3>
+                <div className="table-container table-scroll-3">
+                    <table className="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Phone</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {policeUsers.map(user => (
+                                <tr key={user._id}>
+                                    <td>{user.name}</td>
+                                    <td>{user.email}</td>
+                                    <td>
+                                        <span className={`role-badge role-${user.role}`}>
+                                            {user.role}
+                                        </span>
+                                    </td>
+                                    <td>{user.phoneNumber || 'N/A'}</td>
+                                    <td>
+                                        <button
+                                            onClick={() => handleUserAction(user._id, 'suspend')}
+                                            className="btn btn-warning btn-sm"
+                                        >
+                                            Suspend
+                                        </button>
+                                        <button
+                                            onClick={() => handleUserAction(user._id, 'activate')}
+                                            className="btn btn-success btn-sm"
+                                        >
+                                            Activate
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {policeUsers.length === 0 && (
+                                <tr><td colSpan="5">No police users</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Regular Users Section */}
+                <h3 style={{ marginTop: 20 }}>Users</h3>
+                <div className="table-container table-scroll-3">
+                    <table className="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Phone</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {regularUsers.map(user => (
+                                <tr key={user._id}>
+                                    <td>{user.name}</td>
+                                    <td>{user.email}</td>
+                                    <td>
+                                        <span className={`role-badge role-${user.role}`}>
+                                            {user.role}
+                                        </span>
+                                    </td>
+                                    <td>{user.phoneNumber || 'N/A'}</td>
+                                    <td>
+                                        <button
+                                            onClick={() => handleUserAction(user._id, 'suspend')}
+                                            className="btn btn-warning btn-sm"
+                                        >
+                                            Suspend
+                                        </button>
+                                        <button
+                                            onClick={() => handleUserAction(user._id, 'activate')}
+                                            className="btn btn-success btn-sm"
+                                        >
+                                            Activate
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {regularUsers.length === 0 && (
+                                <tr><td colSpan="5">No users</td></tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -376,7 +567,7 @@ const AdminDashboard = ({ user }) => {
             {/* Alerts Management */}
             <div className="dashboard-section">
                 <h2>Alert Management</h2>
-                <div className="table-container">
+                <div className="table-container table-scroll-10">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -386,13 +577,28 @@ const AdminDashboard = ({ user }) => {
                                 <th>Assigned To</th>
                                 <th>Created Time</th>
                                 <th>Last Updated</th>
+                                <th>Live Audio</th>
                             </tr>
                         </thead>
                         <tbody>
                             {alerts.map(alert => (
                                 <tr key={alert._id}>
-                                    <td>{alert.userName}</td>
-                                    <td>{alert.location}</td>
+                                    <td>{alert.userId?.name || alert.userName}</td>
+                                    <td>
+                                        <span
+                                            style={{
+                                                display: 'block',
+                                                height: '4.8em', /* ~4 lines at 1.2em each */
+                                                lineHeight: '1.2em',
+                                                overflowY: 'auto',
+                                                width: '100%',
+                                                whiteSpace: 'pre-wrap',
+                                                wordBreak: 'break-word'
+                                            }}
+                                        >
+                                            {addressCache[alert._id] || (!alert.location || looksLikeCoords(alert.location) ? (alert.coordinates || 'Unknown location') : alert.location)}
+                                        </span>
+                                    </td>
                                     <td>
                                         <span className={`status-badge status-${alert.status}`}>
                                             {alert.status}
@@ -412,11 +618,59 @@ const AdminDashboard = ({ user }) => {
                                          alert.assignedAt ? new Date(alert.assignedAt).toLocaleString() :
                                          'Not updated'}
                                     </td>
+                                    <td>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            title={liveMap[alert._id] ? 'Listen to live audio' : 'You can still try to listen; player will wait for live stream'}
+                                            onClick={() => setListeningAlertId(alert._id)}
+                                        >
+                                            {liveMap[alert._id] ? 'Listen' : 'Listen (Waiting for Live)'} {listeningAlertId === alert._id ? '(Active)' : ''}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
+                {listeningAlertId && (
+                    <div style={{ marginTop: '15px' }}>
+                        <h3>Live Audio Stream</h3>
+                        <LiveAudioListener alertId={listeningAlertId} />
+                        <h4 style={{ marginTop: 12 }}>Saved Recordings</h4>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="table table-striped table-dark">
+                                <thead>
+                                    <tr>
+                                        <th>When</th>
+                                        <th>User</th>
+                                        <th>MIME</th>
+                                        <th>Size</th>
+                                        <th>Play/Download</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(recordingsMap[listeningAlertId] || []).map((rec) => (
+                                        <tr key={rec._id}>
+                                            <td>{new Date(rec.createdAt).toLocaleString()}</td>
+                                            <td>{rec.userId?.name || rec.userName} {rec.userId?.email ? `(${rec.userId.email})` : ''}</td>
+                                            <td>{rec.mimeType}</td>
+                                            <td>{(rec.size/1024).toFixed(1)} KB</td>
+                                            <td>
+                                                <audio controls src={`${config.BACKEND_URL}${rec.fileUrl}`} style={{ maxWidth: 220 }} />
+                                                <a className="btn btn-sm btn-secondary" style={{ marginLeft: 8 }} href={`${config.BACKEND_URL}${rec.fileUrl}`} target="_blank" rel="noreferrer">Download</a>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {(recordingsMap[listeningAlertId] || []).length === 0 && (
+                                        <tr>
+                                            <td colSpan="5">No recordings yet for this alert.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Alert Map View */}

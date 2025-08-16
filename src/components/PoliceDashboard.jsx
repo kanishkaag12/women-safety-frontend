@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
 import DashboardHeader from './DashboardHeader';
 import DashboardFooter from './DashboardFooter';
 import AlertMap from './AlertMap';
+import LiveAudioListener from './LiveAudioListener';
 import config from '../config';
 import './Dashboard.css';
 
@@ -19,6 +21,9 @@ const PoliceDashboard = ({ user }) => {
         resolvedCases: 0,
         responseTime: 0
     });
+    const [listeningAlertId, setListeningAlertId] = useState(null);
+    const [liveMap, setLiveMap] = useState({}); // alertId -> isLive
+    const [recordingsMap, setRecordingsMap] = useState({}); // alertId -> recordings[]
 
     useEffect(() => {
         console.log('PoliceDashboard user object:', user);
@@ -26,6 +31,37 @@ const PoliceDashboard = ({ user }) => {
         console.log('User _id:', user?._id);
         fetchDashboardData();
     }, []);
+
+    // Subscribe to global live-status to enable/disable Listen buttons
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const socket = io(config.BACKEND_URL, { auth: { token } });
+        socket.on('live-status', ({ alertId, isLive }) => {
+            if (!alertId) return;
+            setLiveMap(prev => ({ ...prev, [alertId]: !!isLive }));
+        });
+        return () => { try { socket.disconnect(); } catch(_) {} };
+    }, []);
+
+    // Fetch saved recordings when selecting an alert to listen
+    useEffect(() => {
+        const fetchRecordings = async () => {
+            if (!listeningAlertId) return;
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const res = await fetch(`${config.BACKEND_URL}/api/alerts/${listeningAlertId}/recordings`, {
+                    headers: { 'x-auth-token': token }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setRecordingsMap(prev => ({ ...prev, [listeningAlertId]: data }));
+                }
+            } catch (_) { /* ignore */ }
+        };
+        fetchRecordings();
+    }, [listeningAlertId]);
 
     const fetchDashboardData = async () => {
         try {
@@ -197,7 +233,7 @@ const PoliceDashboard = ({ user }) => {
                 <p className="section-description">
                     New alerts that require police attention. Use "Assign Case" to take ownership or "Acknowledge" to confirm you've seen the alert. All cases are treated with high priority.
                 </p>
-                <div className="table-container">
+                <div className="table-container table-scroll-3">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -206,12 +242,13 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Time</th>
                                 <th>Priority</th>
                                 <th>Actions</th>
+                                <th>Live Audio</th>
                             </tr>
                         </thead>
                         <tbody>
                             {activeAlerts.map(alert => (
                                 <tr key={alert._id} className={alert.priority === 'high' ? 'high-priority' : ''}>
-                                    <td>{alert.userName}</td>
+                                    <td>{alert.userId?.name || alert.userName}</td>
                                     <td>{alert.location}</td>
                                     <td>{new Date(alert.createdAt).toLocaleString()}</td>
                                     <td>
@@ -233,6 +270,15 @@ const PoliceDashboard = ({ user }) => {
                                             Acknowledge
                                         </button>
                                     </td>
+                                    <td>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+        									title={liveMap[alert._id] ? 'Listen to live audio' : 'You can still try to listen; player will wait for live stream'}
+                                            onClick={() => setListeningAlertId(alert._id)}
+                                        >
+                                            {liveMap[alert._id] ? 'Listen' : 'Listen (Waiting for Live)'} {listeningAlertId === alert._id ? '(Active)' : ''}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -246,7 +292,7 @@ const PoliceDashboard = ({ user }) => {
                 <p className="section-description">
                     Cases you're currently working on. Use "In Progress" when you start working or "Resolve" when completed.
                 </p>
-                <div className="table-container">
+                <div className="table-container table-scroll-3">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -256,13 +302,14 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Status</th>
                                 <th>Assigned Time</th>
                                 <th>Actions</th>
+                                <th>Live Audio</th>
                             </tr>
                         </thead>
                         <tbody>
                             {assignedCases.map(caseItem => (
                                 <tr key={caseItem._id}>
                                     <td>{caseItem._id.slice(-6)}</td>
-                                    <td>{caseItem.userName}</td>
+                                    <td>{caseItem.userId?.name || caseItem.userName}</td>
                                     <td>{caseItem.location}</td>
                                     <td>
                                         <span className={`status-badge status-${caseItem.status}`}>
@@ -284,6 +331,15 @@ const PoliceDashboard = ({ user }) => {
                                             Resolve
                                         </button>
                                     </td>
+                                    <td>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            title={liveMap[caseItem._id] ? 'Listen to live audio' : 'You can still try to listen; player will wait for live stream'}
+                                            onClick={() => setListeningAlertId(caseItem._id)}
+                                        >
+                                            {liveMap[caseItem._id] ? 'Listen' : 'Listen (Waiting for Live)'} {listeningAlertId === caseItem._id ? '(Active)' : ''}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -297,7 +353,7 @@ const PoliceDashboard = ({ user }) => {
                 <p className="section-description">
                     Cases you've acknowledged but haven't started working on yet. Use "In Progress" when you begin active work.
                 </p>
-                <div className="table-container">
+                <div className="table-container table-scroll-3">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -307,13 +363,14 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Status</th>
                                 <th>Acknowledged Time</th>
                                 <th>Actions</th>
+                                <th>Live Audio</th>
                             </tr>
                         </thead>
                         <tbody>
                             {acknowledgedCases.map(caseItem => (
                                 <tr key={caseItem._id} className="acknowledged-case">
                                     <td>{caseItem._id.slice(-6)}</td>
-                                    <td>{caseItem.userName}</td>
+                                    <td>{caseItem.userId?.name || caseItem.userName}</td>
                                     <td>{caseItem.location}</td>
                                     <td>
                                         <span className={`status-badge status-${caseItem.status}`}>
@@ -335,6 +392,14 @@ const PoliceDashboard = ({ user }) => {
                                             Resolve
                                         </button>
                                     </td>
+                                    <td>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            onClick={() => setListeningAlertId(caseItem._id)}
+                                        >
+                                            Listen {listeningAlertId === caseItem._id ? '(Active)' : ''}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -348,7 +413,7 @@ const PoliceDashboard = ({ user }) => {
                 <p className="section-description">
                     Cases you're actively working on. Use "Resolve" when the case is completed.
                 </p>
-                <div className="table-container">
+                <div className="table-container table-scroll-3">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -358,13 +423,14 @@ const PoliceDashboard = ({ user }) => {
                                 <th>Status</th>
                                 <th>Started Time</th>
                                 <th>Actions</th>
+                                <th>Live Audio</th>
                             </tr>
                         </thead>
                         <tbody>
                             {inProgressCases.map(caseItem => (
                                 <tr key={caseItem._id} className="in-progress-case">
                                     <td>{caseItem._id.slice(-6)}</td>
-                                    <td>{caseItem.userName}</td>
+                                    <td>{caseItem.userId?.name || caseItem.userName}</td>
                                     <td>{caseItem.location}</td>
                                     <td>
                                         <span className={`status-badge status-${caseItem.status}`}>
@@ -380,6 +446,14 @@ const PoliceDashboard = ({ user }) => {
                                             Resolve
                                         </button>
                                     </td>
+                                    <td>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            onClick={() => setListeningAlertId(caseItem._id)}
+                                        >
+                                            Listen {listeningAlertId === caseItem._id ? '(Active)' : ''}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -393,7 +467,7 @@ const PoliceDashboard = ({ user }) => {
                 <p className="section-description">
                     Successfully completed cases. These cases have been resolved and no longer require action.
                 </p>
-                <div className="table-container">
+                <div className="table-container table-scroll-3">
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -408,7 +482,7 @@ const PoliceDashboard = ({ user }) => {
                             {resolvedCases.map(caseItem => (
                                 <tr key={caseItem._id} className="resolved-case">
                                     <td>{caseItem._id.slice(-6)}</td>
-                                    <td>{caseItem.userName}</td>
+                                    <td>{caseItem.userId?.name || caseItem.userName}</td>
                                     <td>{caseItem.location}</td>
                                     <td>{new Date(caseItem.resolvedAt || caseItem.updatedAt).toLocaleString()}</td>
                                     <td>
@@ -450,6 +524,47 @@ const PoliceDashboard = ({ user }) => {
             <div className="dashboard-section">
                 <AlertMap alerts={activeAlerts} />
             </div>
+            {listeningAlertId && (
+                <div className="dashboard-section">
+                    <h3>Live Audio Stream</h3>
+                    <LiveAudioListener alertId={listeningAlertId} />
+                    <h4 style={{ marginTop: 12 }}>Saved Recordings</h4>
+                    <div style={{ overflowX: 'auto' }}>
+                        <table className="table table-striped table-dark">
+                            <thead>
+                                <tr>
+                                    <th>When</th>
+                                    <th>User</th>
+                                    <th>MIME</th>
+                                    <th>Size</th>
+                                    <th>Play/Download</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(recordingsMap[listeningAlertId] || []).map((rec) => (
+                                    <tr key={rec._id}>
+                                        <td>{new Date(rec.createdAt).toLocaleString()}</td>
+                                        <td>{rec.userId?.name || rec.userName} {rec.userId?.email ? `(${rec.userId.email})` : ''}</td>
+                                        <td>{rec.mimeType}</td>
+                                        <td>{(rec.size/1024).toFixed(1)} KB</td>
+                                        <td>
+                                            <audio controls src={`${config.BACKEND_URL}${rec.fileUrl}`} style={{ maxWidth: 220 }} />
+                                            <a className="btn btn-sm btn-secondary" style={{ marginLeft: 8 }} href={`${config.BACKEND_URL}${rec.fileUrl}`} target="_blank" rel="noreferrer">Download</a>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ marginTop: 10 }}
+                        onClick={() => setListeningAlertId(null)}
+                    >
+                        Stop Listening
+                    </button>
+                </div>
+            )}
             
             <DashboardFooter />
         </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import config from '../config';
 
 const PersonalInfo = () => {
     const [profile, setProfile] = useState(null);
@@ -11,7 +12,7 @@ const PersonalInfo = () => {
     const fetchProfile = async () => {
         setError('');
         try {
-            const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/auth/profile', {
+            const response = await fetch(config.AUTH_PROFILE, {
                 headers: {
                     'x-auth-token': token
                 }
@@ -33,6 +34,18 @@ const PersonalInfo = () => {
             });
         } catch (err) {
             setError(err.message);
+            // Fallback: allow user to fill the form even if fetch fails
+            setProfile({
+                name: '',
+                email: '',
+                aadhaarNumber: '',
+                phoneNumber: '',
+                age: '',
+                gender: '',
+                homeAddress: '',
+                relativeAddress: '',
+                guardianContactNumber: ''
+            });
         }
     };
 
@@ -51,7 +64,7 @@ const PersonalInfo = () => {
         setError('');
         setSuccess('');
         try {
-            const response = await fetch('https://women-safety-backend-rkkh.onrender.com/api/auth/profile', {
+            const response = await fetch(config.AUTH_PROFILE, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',

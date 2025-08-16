@@ -373,12 +373,29 @@
     overflow-y: auto;
 }
 
+/* Vertical scroll limiter for tables: show up to ~3 rows */
+.table-scroll-3 {
+    max-height: 200px; /* approx 3 rows including header */
+    overflow-y: auto;
+}
+
+/* Keep table headers fixed while scrolling */
+.table-scroll-3 .data-table thead th,
+.table-scroll-10 .data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
 .data-table {
     width: 100%;
-    border-collapse: collapse;
+    /* Use separate to ensure sticky headers work reliably */
+    border-collapse: separate;
+    border-spacing: 0;
     background: white;
     border-radius: 10px;
-    overflow: hidden;
+    /* Allow sticky headers to be visible */
+    overflow: visible;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -875,22 +892,28 @@
 .alert-map-container {
     background: white;
     border-radius: 15px;
-    padding: 25px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    border: 1px solid #e1e8ed;
+    padding: 0; /* removed per request */
+    box-shadow: none; /* remove shadow to avoid popup look */
+    border: none; /* removed per request */
+    max-height: 480px; /* constrain overall height */
+    overflow: hidden; /* scroll only the list below the heading */
 }
 
-.alert-map-container h3 {
+.alert-map-container h2 {
     color: #2d3436;
-    margin-bottom: 20px;
-    font-size: 1.3rem;
+    font-size: 1.5rem; /* slightly larger heading */
     font-weight: 600;
+    margin: 0 0 12px 0; /* space below heading */
+    padding: 10px 12px; /* give some inner space */
+    border-bottom: 2px solid #667eea; /* requested thickness */
 }
 
 .alert-locations {
     display: flex;
     flex-direction: column;
     gap: 15px;
+    max-height: 430px; /* start scroll after the heading underline */
+    overflow-y: auto;
 }
 
 .alert-location-item {

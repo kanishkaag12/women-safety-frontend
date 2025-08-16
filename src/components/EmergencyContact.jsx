@@ -103,6 +103,10 @@ const EmergencyContact = () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
             // Make API request
+            console.log('Making request to:', config.CONTACTS_BASE);
+            console.log('Request data:', contactData);
+            console.log('Token:', token ? 'Present' : 'Missing');
+            
             const response = await fetch(config.CONTACTS_BASE, {
                 method: 'POST',
                 headers: {
@@ -113,6 +117,9 @@ const EmergencyContact = () => {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
+            
+            console.log('Response status:', response.status);
+            console.log('Response ok:', response.ok);
             if (!response.ok) {
                 let errorMessage = 'Failed to add contact';
                 try {
@@ -142,15 +149,22 @@ const EmergencyContact = () => {
             }
         } catch (err) {
             console.error('Error adding contact:', err);
+            console.error('Error details:', {
+                name: err.name,
+                message: err.message,
+                stack: err.stack
+            });
+            
             let errorMessage = 'Failed to add contact';
 
             if (err.name === 'AbortError') {
                 errorMessage = 'Request timed out. Please try again.';
-            } else if (err.message) {
-                // Use the error message if available, otherwise use a generic message
-                errorMessage = err.message.includes('Failed to fetch')
-                    ? 'Network error. Please check your connection.'
-                    : `Error: ${err.message}`;
+            } else if (err.message === 'Failed to fetch') {
+                errorMessage = 'Cannot connect to server. Please ensure the backend is running on http://localhost:5000';
+            } else if (err.message && err.message.trim() !== '') {
+                errorMessage = err.message;
+            } else {
+                errorMessage = 'Network error. Please check your connection and ensure the backend server is running.';
             }
 
             setError(errorMessage);
@@ -252,7 +266,7 @@ const deleteContact = async (contactId) => {
 
         console.log('Deleting contact:', contactId);
 
-        const response = await fetch(`https://women-safety-backend-rkkh.onrender.com/api/contacts/${contactId}`, {
+        const response = await fetch(`${config.CONTACTS_BASE}/${contactId}`, {
             method: 'DELETE',
             headers: {
                 'x-auth-token': token
